@@ -666,17 +666,16 @@ static void clr_int(struct uio48_dev *uiodev, int bit_number)
 static int get_int(struct uio48_dev *uiodev)
 {
 	unsigned base_port = uiodev->base_port;
-	int temp;
-	int x;
+	int i, t, ret = 0;
 
 	spin_lock(&uiodev->spnlck);
 
 	/* Read the master interrupt pending register, mask off undefined
 	 * bits. */
-	temp = inb(base_port + 6) & 0x07;
+	t = inb(base_port + 6) & 0x07;
 
 	/* If there are no pending interrupts, return 0. */
-	if (temp == 0) {
+	if (t == 0) {
 		spin_unlock(&uiodev->spnlck);
 		return 0;
 	}
@@ -685,34 +684,35 @@ static int get_int(struct uio48_dev *uiodev)
 	outb(PAGE3 | inb(base_port + 7), base_port + 7);
 
 	/* Check ports 0, 1, and 2 for interrupt ID register. */
-	for (x = 0; x < 3; x++) {
-		int t;
+	for (i = 0; i < 3; i++) {
+		int j;
 
 		/* Read the interrupt ID register for port. */
-		temp = inb(base_port + 8 + x);
+		t = inb(base_port + 8 + i);
 
 		/* See if any bit set, if so return the bit number. */
-		if (temp == 0)
+		if (t == 0)
 			continue;
 
-		for (t = 0; t <= 7; t++) {
-			if (!(temp & (1 << t)))
+		for (j = 0; j <= 7; j++) {
+			if (!(t & (1 << j)))
 				continue;
-			outb(~PAGE3 & inb(base_port + 7), base_port + 7);
-			spin_unlock(&uiodev->spnlck);
-			return (t + 1 + (8 * x));
+
+			ret = (j + 1 + (8 * i));
+			goto isr_out;
 		}
 	}
 
 	/* We should never get here unless the hardware is seriously
-	 * misbehaving, but just to be sure, we'll turn the page access
-	 * back to 0 and return a 0 for no interrupt found. */
+	 * misbehaving. */
+	WARN_ONCE(1, KBUILD_MODNAME ": Encountered superflous interrupt");
 
+isr_out:
 	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
 	spin_unlock(&uiodev->spnlck);
 
-	return 0;
+	return ret;
 }
 
 static int get_buffered_int(struct uio48_dev *uiodev)
