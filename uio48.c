@@ -37,6 +37,11 @@
 
 static char *RCSInfo = "$Id: uio48.c, v 4.0 2011-06-14 paul Exp $";
 
+// #define DEBUG 1
+
+/* Helper to format our pr_* functions */
+#define pr_fmt(__fmt) KBUILD_MODNAME ": " __fmt
+
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/sched.h>
@@ -53,32 +58,10 @@ static char *RCSInfo = "$Id: uio48.c, v 4.0 2011-06-14 paul Exp $";
 
 #include "uio48.h"
 
-#define DRVR_NAME	"uio48"
-
-// #define DEBUG 1
-
-#ifdef DEBUG
-#define pr_dbg(...) printk(KERN_DEBUG "UIO48: " __VA_ARGS__)
-#else
-#define pr_dbg(...) do{}while(0)
-#endif
-
-struct uio48_dev;
-
-// Function prototypes for local functions
-static void init_io(struct uio48_dev *uiodev, unsigned base_port);
-static int read_bit(struct uio48_dev *uiodev, int bit_number);
-static void write_bit(struct uio48_dev *uiodev, int bit_number, int val);
-static void UIO48_set_bit(struct uio48_dev *uiodev, int bit_num);
-static void clr_bit(struct uio48_dev *uiodev, int bit_num);
-static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity);
-static void disab_int(struct uio48_dev *uiodev, int bit_number);
-static void clr_int(struct uio48_dev *uiodev, int bit_number);
-static int get_int(struct uio48_dev *uiodev);
-static int get_buffered_int(struct uio48_dev *uiodev);
-static void clr_int_id(struct uio48_dev *uiodev, int port_number);
-static void lock_port(struct uio48_dev *uiodev, int port_number);
-static void unlock_port(struct uio48_dev *uiodev, int port_number);
+#define MOD_DESC "WinSystems,Inc. UIO48 Digital I/O Driver"
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION(MOD_DESC);
+MODULE_AUTHOR("Paul DeMetrotion");
 
 // ******************* Device Declarations *****************************
 
@@ -98,6 +81,21 @@ struct uio48_dev {
 	unsigned char port_images[6];
 };
 
+// Function prototypes for local functions
+static void init_io(struct uio48_dev *uiodev, unsigned base_port);
+static int read_bit(struct uio48_dev *uiodev, int bit_number);
+static void write_bit(struct uio48_dev *uiodev, int bit_number, int val);
+static void UIO48_set_bit(struct uio48_dev *uiodev, int bit_num);
+static void clr_bit(struct uio48_dev *uiodev, int bit_num);
+static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity);
+static void disab_int(struct uio48_dev *uiodev, int bit_number);
+static void clr_int(struct uio48_dev *uiodev, int bit_number);
+static int get_int(struct uio48_dev *uiodev);
+static int get_buffered_int(struct uio48_dev *uiodev);
+static void clr_int_id(struct uio48_dev *uiodev, int port_number);
+static void lock_port(struct uio48_dev *uiodev, int port_number);
+static void unlock_port(struct uio48_dev *uiodev, int port_number);
+
 // Driver major number
 static int uio48_init_major;	// 0 = allocate dynamically
 static int uio48_major;
@@ -112,7 +110,9 @@ static int uio48_major;
 static unsigned io[MAX_CHIPS];
 static unsigned irq[MAX_CHIPS];
 
+MODULE_PARM_DESC(io, "Array of IO addresses for devices");
 module_param_array(io, uint, NULL, S_IRUGO);
+MODULE_PARM_DESC(irq, "Array of IRQ routes for devices");
 module_param_array(irq, uint, NULL, S_IRUGO);
 
 static struct uio48_dev uiodevs[MAX_CHIPS];
@@ -133,7 +133,7 @@ static irqreturn_t irq_handler(int __irq, void *dev_id)
 
 		clr_int(uiodev, c);
 
-		pr_dbg("Interrupt on chip %d, bit %d\n", uiodev->id, c);
+		pr_devel("Interrupt on chip %d, bit %d\n", uiodev->id, c);
 
 		uiodev->int_buffer[uiodev->inptr++] = c;
 
@@ -156,13 +156,13 @@ static int device_open(struct inode *inode, struct file *file)
 	struct uio48_dev *uiodev = &uiodevs[minor];
 
 	if (uiodev->base_port == 0) {
-		printk(KERN_WARNING "UIO48 **** OPEN ATTEMPT on uninitialized port *****\n");
+		pr_warning("**** OPEN ATTEMPT on uninitialized port *****\n");
 		return -1;
 	}
 
 	file->private_data = uiodev;
 
-	pr_dbg("device_open(%p)\n", file);
+	pr_devel("device_open(%p)\n", file);
 
 	return SUCCESS;
 }
@@ -173,7 +173,7 @@ static int device_open(struct inode *inode, struct file *file)
 
 static int device_release(struct inode *inode, struct file *file)
 {
-	pr_dbg("device_release(%p,%p)\n", inode, file);
+	pr_devel("device_release(%p,%p)\n", inode, file);
 
 	file->private_data = NULL;
 
@@ -189,7 +189,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 	int i, port, ret_val;
 	int minor __attribute__((unused)) = uiodev->id;
 
-	pr_dbg("IOCTL call minor %d,IOCTL CODE %04X\n", minor, ioctl_num);
+	pr_devel("IOCTL call minor %d,IOCTL CODE %04X\n", minor, ioctl_num);
 
 	// Switch according to the ioctl called
 	switch (ioctl_num) {
@@ -210,7 +210,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 		//release lock
 		mutex_unlock(&uiodev->mtx);
 
-		pr_dbg("Writing to I/O Port %04x with%02x\n", uiodev->base_port + port, ret_val);
+		pr_devel("Writing to I/O Port %04x with%02x\n", uiodev->base_port + port, ret_val);
 
 		return SUCCESS;
 
@@ -231,44 +231,44 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 		return SUCCESS;
 
 	case IOCTL_ENAB_INT:
-		pr_dbg("IOCTL Set_int Device %d Bit %d polarity %d\n",
+		pr_devel("IOCTL Set_int Device %d Bit %d polarity %d\n",
 			minor + 1, (int)(ioctl_param >> 8), (int)(ioctl_param & 0xff));
 
 		enab_int(uiodev, (int)(ioctl_param >> 8), (int)(ioctl_param & 0xff));
 		return SUCCESS;
 
 	case IOCTL_DISAB_INT:
-		pr_dbg("IOCTL Disab_Int Device %d Bit %d\n",
+		pr_devel("IOCTL Disab_Int Device %d Bit %d\n",
 			minor + 1, (int)(ioctl_param & 0xff));
 
 		disab_int(uiodev, (int)(ioctl_param & 0xff));
 		return SUCCESS;
 
 	case IOCTL_CLR_INT:
-		pr_dbg("IOCTL Clr_int Device %d Bit %d\n", minor + 1, (int)(ioctl_param & 0xff));
+		pr_devel("IOCTL Clr_int Device %d Bit %d\n", minor + 1, (int)(ioctl_param & 0xff));
 
 		clr_int(uiodev, (int)(ioctl_param & 0xff));
 		return SUCCESS;
 
 	case IOCTL_GET_INT:
-		pr_dbg("IOCTL get_int device %d\n", minor + 1);
+		pr_devel("IOCTL get_int device %d\n", minor + 1);
 
 		i = get_buffered_int(uiodev);
 		return i;
 
 	case IOCTL_WAIT_INT:
-		pr_dbg("IOCTL wait_int device %d\n", minor + 1);
+		pr_devel("IOCTL wait_int device %d\n", minor + 1);
 
 		if ((i = get_buffered_int(uiodev)))
 			return i;
 
 		// Code to put current process to sleep awaiting interrupt
-		pr_dbg("current process %i (%s) going to sleep\n",
+		pr_devel("current process %i (%s) going to sleep\n",
 			current->pid, current->comm);
 
 		wait_event_interruptible(uiodev->wq, 1);
 
-		pr_dbg("awoken %i (%s)\n", current->pid, current->comm);
+		pr_devel("awoken %i (%s)\n", current->pid, current->comm);
 
 		// Getting here does not guarantee that there's an in interrupt available
 		// we may have been awakened by some other signal. In any case We'll
@@ -278,19 +278,19 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 		return i;
 
 	case IOCTL_CLR_INT_ID:
-		pr_dbg("IOCTL Clr_Int_Id Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
+		pr_devel("IOCTL Clr_Int_Id Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
 
 		clr_int_id(uiodev, (int)(ioctl_param&0xff));
 		return SUCCESS;
 
 	case IOCTL_LOCK_PORT:
-		pr_dbg("IOCTL Lock_Port Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
+		pr_devel("IOCTL Lock_Port Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
 
 		lock_port(uiodev, (int)(ioctl_param & 0xff));
 		return SUCCESS;
 
 	case IOCTL_UNLOCK_PORT:
-		pr_dbg("IOCTL Unock_Port Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
+		pr_devel("IOCTL Unock_Port Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
 
 		unlock_port(uiodev, (int)(ioctl_param & 0xff));
 		return SUCCESS;
@@ -326,25 +326,25 @@ int init_module()
 	int x;
 
 	// Sign-on
-	printk(KERN_INFO "WinSystems, Inc. UIO48 Linux Device Driver\n");
-	printk(KERN_INFO "Copyright 2002-2011, All rights reserved\n");
-	printk(KERN_INFO "%s\n", RCSInfo);
+	pr_info(MOD_DESC "\n");
+	pr_info("Copyright 2002-2011, All rights reserved\n");
+	pr_info("%s\n", RCSInfo);
 
 	// register the character device
 	if (uio48_init_major) {
 		uio48_major = uio48_init_major;
 		devno = MKDEV(uio48_major, 0);
-		ret_val = register_chrdev_region(devno, 1, DRVR_NAME);
+		ret_val = register_chrdev_region(devno, 1, KBUILD_MODNAME);
 	} else {
-		ret_val = alloc_chrdev_region(&devno, 0, 1, DRVR_NAME);
+		ret_val = alloc_chrdev_region(&devno, 0, 1, KBUILD_MODNAME);
 		uio48_major = MAJOR(devno);
 	}
 
 	if (ret_val < 0) {
-		printk(KERN_ERR "UIO48: Cannot obtain major number %d\n", uio48_major);
+		pr_err("Cannot obtain major number %d\n", uio48_major);
 		return -ENODEV;
 	} else {
-		printk(KERN_INFO "UIO48: Major number %d assigned\n", uio48_major);
+		pr_info("Major number %d assigned\n", uio48_major);
 	}
 
 	for (x = io_num = 0; x < MAX_CHIPS; x++) {
@@ -368,30 +368,30 @@ int init_module()
 		ret_val = cdev_add(&uiodev->uio48_cdev, MKDEV(uio48_major, x), MAX_CHIPS);
 
 		if (!ret_val) {
-			printk(KERN_INFO "UIO48: Added character device %s node %d\n", DRVR_NAME, x);
+			pr_info("Added character device node %d\n", x);
 		} else {
-			printk(KERN_ERR "UIO48: Error %d adding character device %s node %d\n", ret_val, DRVR_NAME, x);
+			pr_err("Error %d adding character device node %d\n", ret_val, x);
 			goto exit_cdev_delete;
 		}
 
 		// check and map our I/O region requests
-		if (request_region(io[x], 0x10, DRVR_NAME) == NULL) {
-			printk(KERN_ERR "UIO48: Unable to use I/O Address %04X\n", io[x]);
+		if (request_region(io[x], 0x10, KBUILD_MODNAME) == NULL) {
+			pr_err("Unable to use I/O Address %04X\n", io[x]);
 			io[x] = 0;
 			continue;
 		} else {
-			printk(KERN_INFO "UIO48: Base I/O Address = %04X\n", io[x]);
+			pr_info("Base I/O Address = %04X\n", io[x]);
 			init_io(uiodev, io[x]);
 			io_num++;
 		}
 
 		// check and map any interrupts
 		if (irq[x]) {
-			if (request_irq(irq[x], irq_handler, IRQF_SHARED, DRVR_NAME, uiodev)) {
-				printk(KERN_ERR "UIO48: Unable to register IRQ %d\n", irq[x]);
+			if (request_irq(irq[x], irq_handler, IRQF_SHARED, KBUILD_MODNAME, uiodev)) {
+				pr_err("Unable to register IRQ %d\n", irq[x]);
 			} else {
 				uiodev->irq = irq[x];
-				printk(KERN_INFO "UIO48: IRQ %d registered to Chip %d\n", irq[x], x + 1);
+				pr_info("IRQ %d registered to Chip %d\n", irq[x], x + 1);
 			}
 		}
 	}
@@ -399,7 +399,7 @@ int init_module()
 	if (io_num)
 		return SUCCESS;
 
-	printk(KERN_WARNING "UIO48: No resources available, driver terminating\n");
+	pr_warning("No resources available, driver terminating\n");
 
 exit_cdev_delete:
 	unregister_chrdev_region(devno, 1);
@@ -826,7 +826,3 @@ static void unlock_port(struct uio48_dev *uiodev, int port_number)
 	//release lock
 	mutex_unlock(&uiodev->mtx);
 }
-
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("WinSystems,Inc. UIO48 Digital I/O Driver");
-MODULE_AUTHOR("Paul DeMetrotion");
