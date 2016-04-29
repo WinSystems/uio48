@@ -67,41 +67,56 @@ static char *RCSInfo = "$Id: uio48.c, v 4.0 2011-06-14 paul Exp $";
 
 #include "uio48.h"
 
-#define DRVR_NAME		"uio48"
+#define DRVR_NAME	"uio48"
 #define DRVR_VERSION	"4.0"
 #define DRVR_RELDATE	"1Dec2011"
 
-//#define DEBUG 1
+// #define DEBUG 1
+
+#ifdef DEBUG
+#define pr_dbg(...) printk("<1>UIO48 -" __VA_ARGS__)
+#else
+#define pr_dbg(...) do{}while(0)
+#endif
+
+struct uio48_dev;
 
 // Function prototypes for local functions
-static void init_io(int chip_number, unsigned io_address);
-static int read_bit(int chip_number, int bit_number);
-static void write_bit(int chip_number, int bit_number, int val);
-static void UIO48_set_bit(int chip_num, int bit_num);
-static void clr_bit(int chip_num, int bit_num);
-static void enab_int(int chip_number, int bit_number, int polarity);
-static void disab_int(int chip_number, int bit_number);
-static void clr_int(int chip_number, int bit_number);
-static int get_int(int chip_number);
-static int get_buffered_int(int chip_number);
-static void clr_int_id(int chip_number, int port_number);
-static void lock_port(int chip_number, int port_number);
-static void unlock_port(int chip_number, int port_number);
+static void init_io(struct uio48_dev *uiodev, unsigned base_port);
+static int read_bit(struct uio48_dev *uiodev, int bit_number);
+static void write_bit(struct uio48_dev *uiodev, int bit_number, int val);
+static void UIO48_set_bit(struct uio48_dev *uiodev, int bit_num);
+static void clr_bit(struct uio48_dev *uiodev, int bit_num);
+static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity);
+static void disab_int(struct uio48_dev *uiodev, int bit_number);
+static void clr_int(struct uio48_dev *uiodev, int bit_number);
+static int get_int(struct uio48_dev *uiodev);
+static int get_buffered_int(struct uio48_dev *uiodev);
+static void clr_int_id(struct uio48_dev *uiodev, int port_number);
+static void lock_port(struct uio48_dev *uiodev, int port_number);
+static void unlock_port(struct uio48_dev *uiodev, int port_number);
 
 // ******************* Device Declarations *****************************
 
 #define MAX_INTS 1024
 
+struct uio48_dev {
+	int id;
+	unsigned irq;
+	unsigned char int_buffer[MAX_INTS];
+	int inptr;
+	int outptr;
+	wait_queue_head_t wq;
+	struct mutex mtx;
+	spinlock_t spnlck;
+	struct cdev uio48_cdev;
+	unsigned base_port;
+	unsigned char port_images[6];
+};
+
 // Driver major number
-static int uio48_init_major = 0;	// 0 = allocate dynamically
+static int uio48_init_major;	// 0 = allocate dynamically
 static int uio48_major;
-
-// uio48 char device structure
-static struct cdev uio48_cdev[MAX_CHIPS];
-static int cdev_num;
-
-// This holds the base addresses of the IO chips
-static unsigned base_port[MAX_CHIPS];
 
 // Page defintions
 #define PAGE0		0x0
@@ -116,80 +131,33 @@ static unsigned irq[MAX_CHIPS];
 module_param_array(io, uint, NULL, S_IRUGO);
 module_param_array(irq, uint, NULL, S_IRUGO);
 
-// We will buffer up the transition interrupts and will pass them on
-// to waiting applications
-static unsigned char int_buffer[MAX_CHIPS][MAX_INTS];
-static int inptr[MAX_CHIPS];
-static int outptr[MAX_CHIPS];
+static struct uio48_dev uiodevs[MAX_CHIPS];
 
-// These declarations create the wait queues. One for each supported device
-static DECLARE_WAIT_QUEUE_HEAD(wq_1);
-static DECLARE_WAIT_QUEUE_HEAD(wq_2);
-static DECLARE_WAIT_QUEUE_HEAD(wq_3);
-static DECLARE_WAIT_QUEUE_HEAD(wq_4);
-
-// mutex & spinlock
-static struct mutex mtx[MAX_CHIPS];
-static spinlock_t spnlck[MAX_CHIPS];
-
-// This is the common interrupt handler. It is called by the chip specific
-// handlers with the device number as an argument
-static irqreturn_t common_handler(int __irq, void *dev_id)
+/* UIO48 ISR */
+static irqreturn_t irq_handler(int __irq, void *dev_id)
 {
-	int device = (unsigned long)dev_id;
-	int my_interrupt, count;
+	struct uio48_dev *uiodev = dev_id;
 
-	my_interrupt = irq[device];
+	while (1) {
+		int c;
 
-	do {
-		int x;
+		// obtain irq bit
+		c = get_int(uiodev);
 
-		count = 0;
+		if (c == 0)
+			break;
 
-		for (x = 0; x < MAX_CHIPS; x++) {
-			int c;
+		clr_int(uiodev, c);
 
-			if (irq[x] != my_interrupt)
-				continue;
+		pr_dbg("Interrupt on chip %d, bit %d\n",x,c);
 
-			// obtain irq bit
-			c = get_int(x + 1);
+		uiodev->int_buffer[uiodev->inptr++] = c;
 
-			if (c == 0)
-				continue;
+		if (uiodev->inptr == MAX_INTS)
+			uiodev->inptr = 0;
 
-			clr_int(x+1, c);
-			count++;
-
-			#ifdef DEBUG
-			printk("<1>UIO48 - Interrupt on chip %d, bit %d\n",x,c);
-			#endif
-
-			int_buffer[x][inptr[x]++] = c;
-
-			if (inptr[x] == MAX_INTS)
-				inptr[x] = 0;
-
-			switch (x) {
-			case 0:
-				wake_up_interruptible(&wq_1);
-				break;
-
-			case 1:
-				wake_up_interruptible(&wq_2);
-				break;
-
-			case 2:
-				wake_up_interruptible(&wq_3);
-				break;
-
-			case 3:
-				wake_up_interruptible(&wq_4);
-					break;
-			}
-		}
-
-	} while (count);
+		wake_up_interruptible(&uiodev->wq);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -201,16 +169,16 @@ static irqreturn_t common_handler(int __irq, void *dev_id)
 static int device_open(struct inode *inode, struct file *file)
 {
 	unsigned int minor = MINOR(inode->i_rdev);
+	struct uio48_dev *uiodev = &uiodevs[minor];
 
-	if(base_port[minor] == 0)
-	{
+	if (uiodev->base_port == 0) {
 		printk("<1>UIO48 **** OPEN ATTEMPT on uninitialized port *****\n");
 		return -1;
 	}
 
-	#ifdef DEBUG
-	printk ("<1>UIO48 - device_open(%p)\n", file);
-	#endif
+	file->private_data = uiodev;
+
+	pr_dbg("device_open(%p)\n", file);
 
 	return SUCCESS;
 }
@@ -221,9 +189,9 @@ static int device_open(struct inode *inode, struct file *file)
 
 static int device_release(struct inode *inode, struct file *file)
 {
-	#ifdef DEBUG
-	printk ("<1>UIO48 - device_release(%p,%p)\n", inode, file);
-	#endif
+	pr_dbg("device_release(%p,%p)\n", inode, file);
+
+	file->private_data = NULL;
 
 	return 0;
 }
@@ -233,185 +201,119 @@ static int device_release(struct inode *inode, struct file *file)
 ///**********************************************************************
 static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl_param)
 {
-	int i, device, port, ret_val;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
-	unsigned int minor = MINOR(file->f_dentry->d_inode->i_rdev);
-#else
-	unsigned int minor = MINOR(file_inode(file)->i_rdev);
-#endif
+	struct uio48_dev *uiodev = file->private_data;
+	int i, port, ret_val;
+	int minor __attribute__((unused)) = uiodev->id;
 
-	#ifdef DEBUG
-	printk("<1>UIO48 - IOCTL call minor %d,IOCTL CODE %04X\n",minor,ioctl_num);
-	#endif
+	pr_dbg("IOCTL call minor %d,IOCTL CODE %04X\n", minor, ioctl_num);
 
 	// Switch according to the ioctl called
 	switch (ioctl_num) {
-		case IOCTL_READ_PORT:
-			device = minor;
-			port = (ioctl_param & 0xff);
-			ret_val = inb(base_port[device] + port);
-			return ret_val;
+	case IOCTL_READ_PORT:
+		port = (ioctl_param & 0xff);
+		ret_val = inb(uiodev->base_port + port);
+		return ret_val;
 
-	    case IOCTL_WRITE_PORT:
-			device = minor;
+	case IOCTL_WRITE_PORT:
+		// obtain lock before writing
+		mutex_lock_interruptible(&uiodev->mtx);
 
-			// obtain lock before writing
-			mutex_lock_interruptible(&mtx[device]);
+		port = (ioctl_param >> 8) & 0xff;
+		ret_val = ioctl_param & 0xff;
 
-			port = (ioctl_param >> 8) & 0xff;
-			ret_val = ioctl_param & 0xff;
+		outb(ret_val, uiodev->base_port + port);
 
-			outb(ret_val, base_port[device] + port);
+		//release lock
+		mutex_unlock(&uiodev->mtx);
 
-			//release lock
-			mutex_unlock(&mtx[device]);
+		pr_dbg("Writing to I/O Port %04x with%02x\n", uiodev->base_port + port, ret_val);
 
-			#ifdef DEBUG
-			printk("<1>UIO48 - Writing to I/O Port %04x with%02x\n", base_port[device]+port, ret_val);
-			#endif
+		return SUCCESS;
 
-			return SUCCESS;
+	case IOCTL_READ_BIT:
+		ret_val = read_bit(uiodev, ioctl_param & 0xff);
+		return ret_val;
 
-	    case IOCTL_READ_BIT:
-			device = minor + 1;
-		    ret_val = read_bit(device,ioctl_param & 0xff);
-			return ret_val;
+	case IOCTL_WRITE_BIT:
+		write_bit(uiodev, (ioctl_param >> 8) & 0xff, ioctl_param & 0xff);
+		return SUCCESS;
 
-		case IOCTL_WRITE_BIT:
-			device = minor + 1;
-			write_bit(device, (ioctl_param >> 8) & 0xff, ioctl_param & 0xff);
-			return SUCCESS;
+	case IOCTL_SET_BIT:
+		UIO48_set_bit(uiodev, ioctl_param & 0xff);
+		return SUCCESS;
 
-		case IOCTL_SET_BIT:
-			device = minor + 1;
-			UIO48_set_bit(device, ioctl_param & 0xff);
-			return SUCCESS;
+	case IOCTL_CLR_BIT:
+		clr_bit(uiodev, ioctl_param & 0xff);
+		return SUCCESS;
 
-		case IOCTL_CLR_BIT:
-			device = minor + 1;
-			clr_bit(device, ioctl_param & 0xff);
-			return SUCCESS;
+	case IOCTL_ENAB_INT:
+		pr_dbg("IOCTL Set_int Device %d Bit %d polarity %d\n",
+			minor + 1, (int)(ioctl_param >> 8), (int)(ioctl_param & 0xff));
 
-		case IOCTL_ENAB_INT:
-			device = minor + 1;
+		enab_int(uiodev, (int)(ioctl_param >> 8), (int)(ioctl_param & 0xff));
+		return SUCCESS;
 
-			#ifdef DEBUG
-			printk("<1>UIO48 - IOCTL Set_int Device %d Bit %d polarity %d\n",
-					device, (int)(ioctl_param>>8), (int)(ioctl_param & 0xff));
-			#endif
+	case IOCTL_DISAB_INT:
+		pr_dbg("IOCTL Disab_Int Device %d Bit %d\n",
+			minor + 1, (int)(ioctl_param & 0xff));
 
-			enab_int(device, (int)(ioctl_param >> 8), (int)(ioctl_param&0xff));
-			return SUCCESS;
+		disab_int(uiodev, (int)(ioctl_param & 0xff));
+		return SUCCESS;
 
-		case IOCTL_DISAB_INT:
-			device = minor +1;
+	case IOCTL_CLR_INT:
+		pr_dbg("IOCTL Clr_int Device %d Bit %d\n", minor + 1, (int)(ioctl_param & 0xff));
 
-			#ifdef DEBUG
-			printk("<1>UIO48 - IOCTL Disab_Int Device %d Bit %d\n",
-					device, (int)(ioctl_param & 0xff));
-			#endif
+		clr_int(uiodev, (int)(ioctl_param & 0xff));
+		return SUCCESS;
 
-			disab_int(device, (int)(ioctl_param & 0xff));
-			return SUCCESS;
+	case IOCTL_GET_INT:
+		pr_dbg("IOCTL get_int device %d\n", minor + 1);
 
-	    case IOCTL_CLR_INT:
-			device = minor +1;
+		i = get_buffered_int(uiodev);
+		return i;
 
-			#ifdef DEBUG
-			printk("<1>UIO48 - IOCTL Clr_int Device %d Bit %d\n", device, (int)(ioctl_param & 0xff));
-			#endif
+	case IOCTL_WAIT_INT:
+		pr_dbg("IOCTL wait_int device %d\n", minor + 1);
 
-			clr_int(device, (int)(ioctl_param & 0xff));
-			return SUCCESS;
-
-		case IOCTL_GET_INT:
-			device = minor + 1;
-
-			#ifdef DEBUG
-			printk("<1>UIO48 - IOCTL get_int device %d\n", device);
-			#endif
-
-			i = get_buffered_int(device);
+		if ((i = get_buffered_int(uiodev)))
 			return i;
 
-		case IOCTL_WAIT_INT:
-			device = minor + 1;
+		// Code to put current process to sleep awaiting interrupt
+		pr_dbg("current process %i (%s) going to sleep\n",
+			current->pid, current->comm);
 
-			#ifdef DEBUG
-			printk("<1>UIO48 - IOCTL wait_int device %d\n", device);
-			#endif
+		wait_event_interruptible(uiodev->wq, 1);
 
-			if((i = get_buffered_int(minor + 1)))
-				return i;
+		pr_dbg("awoken %i (%s)\n", current->pid, current->comm);
 
-			// Code to put current process to sleep awaiting interrupt
-			#ifdef DEBUG
-			printk("<1>UIO48 : current process %i (%s) going to sleep\n",
-					current->pid, current->comm);
-			#endif
+		// Getting here does not guarantee that there's an in interrupt available
+		// we may have been awakened by some other signal. In any case We'll
+		// return whatever's available in the interrupt queue even if it's empty
+		i = get_buffered_int(uiodev);
 
-			switch (minor) {
-			case 0:
-				wait_event_interruptible(wq_1, 1);
-				break;
+		return i;
 
-			case 1:
-				wait_event_interruptible(wq_2, 1);
-				break;
+	case IOCTL_CLR_INT_ID:
+		pr_dbg("IOCTL Clr_Int_Id Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
 
-			case 2:
-				wait_event_interruptible(wq_3, 1);
-				break;
+		clr_int_id(uiodev, (int)(ioctl_param&0xff));
+		return SUCCESS;
 
-			case 3:
-				wait_event_interruptible(wq_4, 1);
-				break;
-			}
+	case IOCTL_LOCK_PORT:
+		pr_dbg("IOCTL Lock_Port Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
 
-			#ifdef DEBUG
-			printk("<1>UIO48 : awoken %i (%s)\n", current->pid, current->comm);
-			#endif
+		lock_port(uiodev, (int)(ioctl_param & 0xff));
+		return SUCCESS;
 
-			// Getting here does not guarantee that there's an in interrupt available
-			// we may have been awakened by some other signal. In any case We'll
-			// return whatever's available in the interrupt queue even if it's empty
-			i = get_buffered_int(minor + 1);
+	case IOCTL_UNLOCK_PORT:
+		pr_dbg("IOCTL Unock_Port Device %d Port %d\n", minor + 1, (int)(ioctl_param & 0xff));
 
-			return i;
+		unlock_port(uiodev, (int)(ioctl_param & 0xff));
+		return SUCCESS;
 
-		case IOCTL_CLR_INT_ID:
-			device = minor + 1;
-
-			#ifdef DEBUG
-			printk("<1>UIO48 - IOCTL Clr_Int_Id Device %d Port %d\n", device, (int)(ioctl_param & 0xff));
-			#endif
-
-			clr_int_id(device,(int)(ioctl_param&0xff));
-			return SUCCESS;
-
-		case IOCTL_LOCK_PORT:
-			device = minor + 1;
-
-			#ifdef DEBUG
-			printk("<1>UIO48 - IOCTL Lock_Port Device %d Port %d\n", device, (int)(ioctl_param & 0xff));
-			#endif
-
-			lock_port(device,(int)(ioctl_param&0xff));
-			return SUCCESS;
-
-		case IOCTL_UNLOCK_PORT:
-			device = minor + 1;
-
-			#ifdef DEBUG
-			printk("<1>UIO48 - IOCTL Unock_Port Device %d Port %d\n", device, (int)(ioctl_param & 0xff));
-			#endif
-
-			unlock_port(device,(int)(ioctl_param&0xff));
-			return SUCCESS;
-
-		// Catch all return
-		default:
-			return(-EINVAL);
+	// Catch all return
+	default:
+		return(-EINVAL);
 	}
 
 	return SUCCESS;
@@ -436,8 +338,8 @@ static struct file_operations uio48_fops = {
 int init_module()
 {
 	int ret_val, io_num;
-	unsigned long x;
 	dev_t devno;
+	int x;
 
 	// Sign-on
 	printk("<1>WinSystems, Inc. UIO48 Linux Device Driver\n");
@@ -445,98 +347,80 @@ int init_module()
 	printk("<1>%s\n", RCSInfo);
 
 	// register the character device
-	if(uio48_init_major)
-	{
+	if (uio48_init_major) {
 		uio48_major = uio48_init_major;
 		devno = MKDEV(uio48_major, 0);
 		ret_val = register_chrdev_region(devno, 1, DRVR_NAME);
-	}
-	else
-	{
+	} else {
 		ret_val = alloc_chrdev_region(&devno, 0, 1, DRVR_NAME);
 		uio48_major = MAJOR(devno);
 	}
 
-	if(ret_val < 0)
-	{
+	if (ret_val < 0) {
 		printk("<1>UIO48 - Cannot obtain major number %d\n", uio48_major);
 		return -ENODEV;
-	}
-	else
+	} else {
 		printk("<1>UIO48 - Major number %d assigned\n", uio48_major);
+	}
 
-	// initialize character devices
-	for(x = 0, cdev_num = 0; x < MAX_CHIPS; x++)
-	{
-		if(io[x])	// is device required?
-		{
-			// add character device
-			cdev_init(&uio48_cdev[x], &uio48_fops);
-			uio48_cdev[x].owner = THIS_MODULE;
-			uio48_cdev[x].ops = &uio48_fops;
-			ret_val = cdev_add(&uio48_cdev[x], MKDEV(uio48_major, x), MAX_CHIPS);
+	for (x = io_num = 0; x < MAX_CHIPS; x++) {
+		struct uio48_dev *uiodev = &uiodevs[x];
 
-			if(!ret_val)
-			{
-				printk("<1>UIO48 - Added character device %s node %ld\n", DRVR_NAME, x);
-				cdev_num++;
-			}
-			else
-			{
-				printk("<1>UIO48 - Error %d adding character device %s node %ld\n", ret_val, DRVR_NAME, x);
-				goto exit_cdev_delete;
+		if (io[x] == 0)	// is device required?
+			continue;
+
+		// initialize mutex array
+		mutex_init(&uiodev->mtx);
+
+		// initialize spinlock array
+		spin_lock_init(&uiodev->spnlck);
+
+		uiodev->id = x;
+
+		// Initialize char device
+		cdev_init(&uiodev->uio48_cdev, &uio48_fops);
+		uiodev->uio48_cdev.owner = THIS_MODULE;
+		uiodev->uio48_cdev.ops = &uio48_fops;
+		ret_val = cdev_add(&uiodev->uio48_cdev, MKDEV(uio48_major, x), MAX_CHIPS);
+
+		if (!ret_val) {
+			printk("<1>UIO48 - Added character device %s node %d\n", DRVR_NAME, x);
+		} else {
+			printk("<1>UIO48 - Error %d adding character device %s node %d\n", ret_val, DRVR_NAME, x);
+			goto exit_cdev_delete;
+		}
+
+		// check and map our I/O region requests
+		if (request_region(io[x], 0x10, DRVR_NAME) == NULL) {
+			printk("<1>UIO48 - Unable to use I/O Address %04X\n", io[x]);
+			io[x] = 0;
+			continue;
+		} else {
+			printk("<1>UIO48 - Base I/O Address = %04X\n", io[x]);
+			init_io(uiodev, io[x]);
+			io_num++;
+		}
+
+		// check and map any interrupts
+		if (irq[x]) {
+			if (request_irq(irq[x], irq_handler, IRQF_SHARED, DRVR_NAME, uiodev)) {
+				printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
+			} else {
+				uiodev->irq = irq[x];
+				printk("<1>UIO48 - IRQ %d registered to Chip %d\n", irq[x], x + 1);
 			}
 		}
 	}
 
-	for(x = 0, io_num = 0; x < MAX_CHIPS; x++)
-	{
-		if(io[x])	// is device required?
-		{
-			// initialize mutex array
-			mutex_init(&mtx[x]);
+	if (io_num)
+		return SUCCESS;
 
-			// initialize spinlock array
-			spin_lock_init(&spnlck[x]);
-
-			// check and map our I/O region requests
-			if(request_region(io[x], 0x10, DRVR_NAME) == NULL)
-			{
-				printk("<1>UIO48 - Unable to use I/O Address %04X\n", io[x]);
-				io[x] = 0;
-				continue;
-			}
-			else
-			{
-				printk("<1>UIO48 - Base I/O Address = %04X\n", io[x]);
-				init_io(x, io[x]);
-				io_num++;
-			}
-
-			// check and map any interrupts
-			if (irq[x]) {
-				if (request_irq(irq[x], common_handler, IRQF_SHARED, DRVR_NAME, (void *)x))
-					printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-				else
-					printk("<1>UIO48 - IRQ %d registered to Chip %ld\n", irq[x], x + 1);
-			}
-		}
-	}
-
-	if (!io_num)	// no resources allocated
-	{
-		printk("<1>UIO48 - No resources available, driver terminating\n");
-		goto exit_cdev_delete;
-	}
-
-	return SUCCESS;
+	printk("<1>UIO48 - No resources available, driver terminating\n");
 
 exit_cdev_delete:
-	while (cdev_num)
-		cdev_del(&uio48_cdev[--cdev_num]);
-
 	unregister_chrdev_region(devno, 1);
 	uio48_major = 0;
+
 	return -ENODEV;
 }
 
@@ -549,20 +433,14 @@ void cleanup_module()
 	int x;
 
 	// unregister I/O port usage
-	for(x=0; x < MAX_CHIPS; x++)
-	{
-		if(io[x])
-		{
-			release_region(io[x], 0x10);
+	for (x = 0; x < MAX_CHIPS; x++) {
+		struct uio48_dev *uiodev = &uiodevs[x];
 
-			if(irq[x]) free_irq(irq[x], RCSInfo);
-		}
-	}
+		if (uiodev->base_port)
+			release_region(uiodev->base_port, 0x10);
 
-	for(x=0; x < cdev_num; x++)
-	{
-		// remove and unregister the device
-		cdev_del(&uio48_cdev[x]);
+		if (uiodev->irq)
+			free_irq(uiodev->irq, uiodev);
 	}
 
 	unregister_chrdev_region(MKDEV(uio48_major, 0), 1);
@@ -570,57 +448,50 @@ void cleanup_module()
 }
 
 // ******************* Device Subroutines *****************************
-// This array holds the image values of the last write to each I/O port
-// This allows bit manipulation routines to work without having to actually do
-// a read-modify-write to the I/O port
-static unsigned char port_images[MAX_CHIPS][6];
 
-static void init_io(int chip_number, unsigned io_address)
+static void init_io(struct uio48_dev *uiodev, unsigned base_port)
 {
 	int x;
 
 	// obtain lock
-	mutex_lock_interruptible(&mtx[chip_number]);
+	mutex_lock_interruptible(&uiodev->mtx);
 
 	// save the address for later use
-	base_port[chip_number] = io_address;
+	uiodev->base_port = base_port;
 
 	// Clear all of the I/O ports. This also makes them inputs
-	for(x=0; x < 7; x++)
-		outb(0,base_port[chip_number]+x);
+	for (x = 0; x < 7; x++)
+		outb(0, base_port + x);
 
 	// Clear the image values as well
-	for(x=0; x < 6; x++)
-		port_images[chip_number][x] = 0;
+	for (x = 0; x < 6; x++)
+		uiodev->port_images[x] = 0;
 
 	// Set page 2 access, for interrupt enables
-	outb(PAGE2 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(PAGE2 | inb(base_port + 7), base_port + 7);
 
 	// Clear all interrupt enables
-	outb(0,base_port[chip_number] + 8);
-	outb(0,base_port[chip_number] + 9);
-	outb(0,base_port[chip_number] + 0x0a);
+	outb(0, base_port + 8);
+	outb(0, base_port + 9);
+	outb(0, base_port + 0x0a);
 
 	// Restore page 0 register access
-	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
 	//release lock
-	mutex_unlock(&mtx[chip_number]);
+	mutex_unlock(&uiodev->mtx);
 }
 
-static int read_bit(int chip_number, int bit_number)
+static int read_bit(struct uio48_dev *uiodev, int bit_number)
 {
 	unsigned port;
 	int val;
-
-	// Adjust chip number to zero based addressing
-	--chip_number;
 
 	// Adjust bit_number to 0 to 47 numbering
 	--bit_number;
 
 	// Calculate the I/O port address based on the updated bit_number
-	port = (bit_number / 8) + base_port[chip_number];
+	port = (bit_number / 8) + uiodev->base_port;
 
 	// Get the current contents of the port
 	val = inb(port);
@@ -634,26 +505,23 @@ static int read_bit(int chip_number, int bit_number)
 	return 0;
 }
 
-static void write_bit(int chip_number, int bit_number, int val)
+static void write_bit(struct uio48_dev *uiodev, int bit_number, int val)
 {
 	unsigned port;
 	unsigned temp;
 	unsigned mask;
 
-	// Adjust the chip number for 0 based numbering
-	--chip_number;
-
 	// Adjust bit number for 0 based numbering
 	--bit_number;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&mtx[chip_number]);
+	mutex_lock_interruptible(&uiodev->mtx);
 
 	// Calculate the I/O address of the port based on the bit number
-	port = (bit_number / 8) + base_port[chip_number];
+	port = (bit_number / 8) + uiodev->base_port;
 
 	// Use the image value to avoid having to read the port first
-	temp = port_images[chip_number][bit_number / 8];
+	temp = uiodev->port_images[bit_number / 8];
 
 	// Calculate a bit mask for the specified bit
 	mask = (1 << (bit_number % 8));
@@ -665,48 +533,46 @@ static void write_bit(int chip_number, int bit_number, int val)
 		temp = temp & ~mask;
 
 	// Update the image value with the value we're about to write
-	port_images[chip_number][bit_number /8] = temp;
+	uiodev->port_images[bit_number /8] = temp;
 
 	// Now actally update the port. Only the specified bit is affected
 	outb(temp, port);
 
 	//release lock
-	mutex_unlock(&mtx[chip_number]);
+	mutex_unlock(&uiodev->mtx);
 }
 
-static void UIO48_set_bit(int chip_num, int bit_num)
+static void UIO48_set_bit(struct uio48_dev *uiodev, int bit_num)
 {
-	write_bit(chip_num, bit_num, 1);
+	write_bit(uiodev, bit_num, 1);
 }
 
-static void clr_bit(int chip_num, int bit_num)
+static void clr_bit(struct uio48_dev *uiodev, int bit_num)
 {
-	write_bit(chip_num, bit_num, 0);
+	write_bit(uiodev, bit_num, 0);
 }
 
-static void enab_int(int chip_number, int bit_number, int polarity)
+static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
 {
 	unsigned port;
 	unsigned temp;
 	unsigned mask;
-
-	// Adjust for 0 based numbering
-	--chip_number;
+	unsigned base_port = uiodev->base_port;
 
 	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
-	mutex_lock_interruptible(&mtx[chip_number]);
+	mutex_lock_interruptible(&uiodev->mtx);
 
 	// Calculate the I/O address based upon bit number
-	port = (bit_number / 8) + base_port[chip_number] + 8;
+	port = (bit_number / 8) + base_port + 8;
 
 	// Calculate a bit mask based upon the specified bit number
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(PAGE2 | inb(base_port + 7), base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -718,50 +584,48 @@ static void enab_int(int chip_number, int bit_number, int polarity)
 	outb(temp,port);
 
 	// Turn on access to page 1 for polarity control
-	outb(PAGE1 | (~PAGE3 & inb(base_port[chip_number] + 7)), base_port[chip_number] + 7);
+	outb(PAGE1 | (~PAGE3 & inb(base_port + 7)), base_port + 7);
 
 	// Get the current state of the polarity register
 	temp = inb(port);
 
 	// Set the polarity according to the argument in the image value
-	if(polarity)
-	    temp = temp | mask;
-    else
-	    temp = temp & ~mask;
+	if (polarity)
+		temp = temp | mask;
+	else
+		temp = temp & ~mask;
 
 	// Write out the new polarity value
 	outb(temp, port);
 
 	// Set access back to page 0
-	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
 	//release lock
-	mutex_unlock(&mtx[chip_number]);
+	mutex_unlock(&uiodev->mtx);
 }
 
-static void disab_int(int chip_number, int bit_number)
+static void disab_int(struct uio48_dev *uiodev, int bit_number)
 {
 	unsigned port;
 	unsigned temp;
 	unsigned mask;
-
-	// Adjust for 0 based numbering
-	--chip_number;
+	unsigned base_port = uiodev->base_port;
 
 	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
-	mutex_lock_interruptible(&mtx[chip_number]);
+	mutex_lock_interruptible(&uiodev->mtx);
 
 	// Calculate the I/O address based upon bit number
-	port = (bit_number / 8) + base_port[chip_number] + 8;
+	port = (bit_number / 8) + base_port + 8;
 
 	// Calculate a bit mask based upon the specified bit number
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(PAGE2 | inb(base_port + 7), base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -773,36 +637,33 @@ static void disab_int(int chip_number, int bit_number)
 	outb(temp, port);
 
 	// Set access back to page 0
-	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
 	//release lock
-	mutex_unlock(&mtx[chip_number]);
+	mutex_unlock(&uiodev->mtx);
 }
 
-static void clr_int(int chip_number, int bit_number)
+static void clr_int(struct uio48_dev *uiodev, int bit_number)
 {
 	unsigned port;
 	unsigned temp;
 	unsigned mask;
+	unsigned base_port = uiodev->base_port;
 
-	// Adjust for 0 based numbering
-	--chip_number;
-
-	// Also adjust bit number
+	// Adjust bit number
 	--bit_number;
 
 	// obtain lock
-	spin_lock(&spnlck[chip_number]);
-	//mutex_lock_interruptible(&mtx[chip_number]);
+	spin_lock(&uiodev->spnlck);
 
 	// Calculate the I/O address based upon bit number
-	port = (bit_number / 8) + base_port[chip_number] + 8;
+	port = (bit_number / 8) + base_port + 8;
 
 	// Calculate a bit mask based upon the specified bit number
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(PAGE2 | inb(base_port + 7), base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -819,42 +680,36 @@ static void clr_int(int chip_number, int bit_number)
 	outb(temp, port);
 
 	// Set access back to page 0
-	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
 	//release lock
-	spin_unlock(&spnlck[chip_number]);
-	//mutex_unlock(&mtx[chip_number]);
+	spin_unlock(&uiodev->spnlck);
 }
 
-static int get_int(int chip_number)
+static int get_int(struct uio48_dev *uiodev)
 {
+	unsigned base_port = uiodev->base_port;
 	int temp;
 	int x;
 
-	// Adjust the chip number for 0 based numbering
-	--chip_number;
-
 	// obtain lock
-	spin_lock(&spnlck[chip_number]);
-	//mutex_lock_interruptible(&mtx[chip_number]);
+	spin_lock(&uiodev->spnlck);
 
 	// Read the master interrupt pending register,
 	// mask off undefined bits
-	temp = inb(base_port[chip_number]+6) & 0x07;
+	temp = inb(base_port + 6) & 0x07;
 
 	// If there are no pending interrupts, return 0
-	if((temp & 7) == 0)
-	{
-		spin_unlock(&spnlck[chip_number]);
-		//mutex_unlock(&mtx[chip_number]);	//release lock
+	if ((temp & 7) == 0) {
+		spin_unlock(&uiodev->spnlck);
 		return 0;
 	}
 
 	// Set access to page 3 for interrupt id register
-	outb(PAGE3 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(PAGE3 | inb(base_port + 7), base_port + 7);
 
 	// Read the interrupt ID register for port 0
-	temp = inb(base_port[chip_number]+8);
+	temp = inb(base_port + 8);
 
 	// See if any bit set, if so return the bit number
 	if(temp != 0)
@@ -863,16 +718,15 @@ static int get_int(int chip_number)
 	    {
 			if(temp & (1 << x))
 			{
-				outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
-				spin_unlock(&spnlck[chip_number]);
-				//mutex_unlock(&mtx[chip_number]);	//release lock
+				outb(~PAGE3 & inb(base_port + 7), base_port + 7);
+				spin_unlock(&uiodev->spnlck);
 				return(x+1);
             }
         }
 	}
 
 	// None in port 0, read port 1 interrupt ID register
-	temp = inb(base_port[chip_number]+9);
+	temp = inb(base_port + 9);
 
 	// See if any bit set, if so return the bit number
 	if(temp != 0)
@@ -881,16 +735,15 @@ static int get_int(int chip_number)
 		{
 			if(temp & (1 << x))
 			{
-				outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
-				spin_unlock(&spnlck[chip_number]);
-				//mutex_unlock(&mtx[chip_number]);	//release lock
+				outb(~PAGE3 & inb(base_port + 7), base_port + 7);
+				spin_unlock(&uiodev->spnlck);
 				return(x+9);
 			}
 	    }
 	}
 
 	// Lastly, read the statur of port 2 interrupt ID register
-	temp = inb(base_port[chip_number]+0x0a);
+	temp = inb(base_port + 0x0a);
 
 	// If any pending, return the appropriate bit number
 	if(temp != 0)
@@ -899,10 +752,9 @@ static int get_int(int chip_number)
 	    {
 			if(temp & (1 << x))
 			{
-				outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
-				spin_unlock(&spnlck[chip_number]);
-				//mutex_unlock(&mtx[chip_number]);	//release lock
-				return(x+17);
+				outb(~PAGE3 & inb(base_port + 7), base_port + 7);
+				spin_unlock(&uiodev->spnlck);
+				return(x + 17);
 			}
 	    }
 	}
@@ -911,37 +763,31 @@ static int get_int(int chip_number)
 	// misbehaving, but just to be sure, we'll turn the page access
 	// back to 0 and return a 0 for no interrupt found
 
-	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
-	spin_unlock(&spnlck[chip_number]);
-	//mutex_unlock(&mtx[chip_number]);	//release lock
+	spin_unlock(&uiodev->spnlck);
 
 	return 0;
 }
 
-static int get_buffered_int(int chip_number)
+static int get_buffered_int(struct uio48_dev *uiodev)
 {
 	int temp;
 
-	// Adjust for 0 based numbering
-	--chip_number;
+	if (uiodev->irq == 0) {
+		temp = get_int(uiodev);
 
-	if(irq[chip_number] == 0)
-	{
-	    temp = get_int(chip_number+1);
-
-		if(temp)
-			clr_int(chip_number+1, temp);
+		if (temp)
+			clr_int(uiodev, temp);
 
 		return temp;
 	}
 
-	if(outptr[chip_number] != inptr[chip_number])
-	{
-	    temp = int_buffer[chip_number][outptr[chip_number]++];
+	if (uiodev->outptr != uiodev->inptr) {
+		temp = uiodev->int_buffer[uiodev->outptr++];
 
-		if(outptr[chip_number] == MAX_INTS)
-			outptr[chip_number] = 0;
+		if (uiodev->outptr == MAX_INTS)
+			uiodev->outptr = 0;
 
 		return temp;
 	}
@@ -949,55 +795,52 @@ static int get_buffered_int(int chip_number)
 	return 0;
 }
 
-static void clr_int_id(int chip_number, int port_number)
+static void clr_int_id(struct uio48_dev *uiodev, int port_number)
 {
-	// Adjust the chip number for 0 based numbering
-	--chip_number;
+	unsigned base_port = uiodev->base_port;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&mtx[chip_number]);
+	mutex_lock_interruptible(&uiodev->mtx);
 
 	// Set access to page 3 for interrupt id register
-	outb(PAGE3 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(PAGE3 | inb(base_port + 7), base_port + 7);
 
 	// write to specified int_id register
-	outb(0, base_port[chip_number] + 8 + port_number);
+	outb(0, base_port + 8 + port_number);
 
 	// Reset access to page 0
-	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
 	//release lock
-	mutex_unlock(&mtx[chip_number]);
+	mutex_unlock(&uiodev->mtx);
 }
 
-static void lock_port(int chip_number, int port_number)
+static void lock_port(struct uio48_dev *uiodev, int port_number)
 {
-	// Adjust the chip number for 0 based numbering
-	--chip_number;
+	unsigned base_port = uiodev->base_port;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&mtx[chip_number]);
+	mutex_lock_interruptible(&uiodev->mtx);
 
 	// write to specified int_id register
-	outb(1 << port_number | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(1 << port_number | inb(base_port + 7), base_port + 7);
 
 	//release lock
-	mutex_unlock(&mtx[chip_number]);
+	mutex_unlock(&uiodev->mtx);
 }
 
-static void unlock_port(int chip_number, int port_number)
+static void unlock_port(struct uio48_dev *uiodev, int port_number)
 {
-	// Adjust the chip number for 0 based numbering
-	--chip_number;
+	unsigned base_port = uiodev->base_port;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&mtx[chip_number]);
+	mutex_lock_interruptible(&uiodev->mtx);
 
 	// write to specified int_id register
-	outb(~(1 << port_number) & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
+	outb(~(1 << port_number) & inb(base_port + 7), base_port + 7);
 
 	//release lock
-	mutex_unlock(&mtx[chip_number]);
+	mutex_unlock(&uiodev->mtx);
 }
 
 MODULE_LICENSE("GPL");
