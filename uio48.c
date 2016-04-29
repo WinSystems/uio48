@@ -149,7 +149,7 @@ static irqreturn_t irq_handler(int __irq, void *dev_id)
 
 		clr_int(uiodev, c);
 
-		pr_dbg("Interrupt on chip %d, bit %d\n",x,c);
+		pr_dbg("Interrupt on chip %d, bit %d\n", uiodev->id, c);
 
 		uiodev->int_buffer[uiodev->inptr++] = c;
 
