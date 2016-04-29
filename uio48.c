@@ -1,17 +1,17 @@
 ///****************************************************************************
-//	
+//
 //	Copyright 2011 by WinSystems Inc.
 //
-//	Permission is hereby granted to the purchaser of WinSystems GPIO cards 
-//	and CPU products incorporating a GPIO device, to distribute any binary 
-//	file or files compiled using this source code directly or in any work 
-//	derived by the user from this file. In no case may the source code, 
-//	original or derived from this file, be distributed to any third party 
-//	except by explicit permission of WinSystems. This file is distributed 
+//	Permission is hereby granted to the purchaser of WinSystems GPIO cards
+//	and CPU products incorporating a GPIO device, to distribute any binary
+//	file or files compiled using this source code directly or in any work
+//	derived by the user from this file. In no case may the source code,
+//	original or derived from this file, be distributed to any third party
+//	except by explicit permission of WinSystems. This file is distributed
 //	on an "As-is" basis and no warranty as to performance or fitness of pur-
-//	poses is expressed or implied. In no case shall WinSystems be liable for 
-//	any direct or indirect loss or damage, real or consequential resulting 
-//	from the usage of this source code. It is the user's sole responsibility 
+//	poses is expressed or implied. In no case shall WinSystems be liable for
+//	any direct or indirect loss or damage, real or consequential resulting
+//	from the usage of this source code. It is the user's sole responsibility
 //	to determine fitness for any considered purpose.
 //
 ///****************************************************************************
@@ -26,7 +26,7 @@
 //
 //	  Date		Revision	                Description
 //	--------	--------	---------------------------------------------
-//	07/21/10	  3.0		Original Release	
+//	07/21/10	  3.0		Original Release
 //	06/14/11	  4.0		Changes:
 //								Function ioctl deprecated for unlocked_ioctl
 //								Added mutex/spinlock support
@@ -73,7 +73,7 @@ static char *RCSInfo = "$Id: uio48.c, v 4.0 2011-06-14 paul Exp $";
 
 //#define DEBUG 1
 
-// Function prototypes for local functions 
+// Function prototypes for local functions
 static void init_io(int chip_number, unsigned io_address);
 static int read_bit(int chip_number, int bit_number);
 static void write_bit(int chip_number, int bit_number, int val);
@@ -87,12 +87,6 @@ static int get_buffered_int(int chip_number);
 static void clr_int_id(int chip_number, int port_number);
 static void lock_port(int chip_number, int port_number);
 static void unlock_port(int chip_number, int port_number);
-
-// Interrupt handlers 
-static irqreturn_t handler_1(int, void *);
-static irqreturn_t handler_2(int, void *);
-static irqreturn_t handler_3(int, void *);
-static irqreturn_t handler_4(int, void *);
 
 // ******************* Device Declarations *****************************
 
@@ -140,106 +134,63 @@ static spinlock_t spnlck[MAX_CHIPS];
 
 // This is the common interrupt handler. It is called by the chip specific
 // handlers with the device number as an argument
-static void common_handler(int device)
+static irqreturn_t common_handler(int __irq, void *dev_id)
 {
-	int my_interrupt, x, c, count;
+	int device = (unsigned long)dev_id;
+	int my_interrupt, count;
 
 	my_interrupt = irq[device];
 
-	while(1)
-	{
-	    count = 0;
+	do {
+		int x;
 
-	    for(x = 0; x < MAX_CHIPS; x++)
-	    {
-			if(irq[x] == my_interrupt)
-			{
-				// obtain irq bit
-				c = get_int(x + 1);
+		count = 0;
 
-				if(c != 0)
-				{
-					clr_int(x+1, c);
-					count++;
-			
-					#ifdef DEBUG
-					printk("<1>UIO48 - Interrupt on chip %d, bit %d\n",x,c);
-					#endif
-			
-					int_buffer[x][inptr[x]++] = c;
-	  		
-					if(inptr[x] == MAX_INTS)
-						inptr[x] = 0;
+		for (x = 0; x < MAX_CHIPS; x++) {
+			int c;
 
-					switch (x) {	
-					case 0:
-						wake_up_interruptible(&wq_1);
-						break;
-			
-					case 1:
-						wake_up_interruptible(&wq_2);
-						break;
-			
-					case 2:
-						wake_up_interruptible(&wq_3);
-						break;
-			
-					case 3:
-						wake_up_interruptible(&wq_4);
-						break;
-		    			}
-				}
+			if (irq[x] != my_interrupt)
+				continue;
+
+			// obtain irq bit
+			c = get_int(x + 1);
+
+			if (c == 0)
+				continue;
+
+			clr_int(x+1, c);
+			count++;
+
+			#ifdef DEBUG
+			printk("<1>UIO48 - Interrupt on chip %d, bit %d\n",x,c);
+			#endif
+
+			int_buffer[x][inptr[x]++] = c;
+
+			if (inptr[x] == MAX_INTS)
+				inptr[x] = 0;
+
+			switch (x) {
+			case 0:
+				wake_up_interruptible(&wq_1);
+				break;
+
+			case 1:
+				wake_up_interruptible(&wq_2);
+				break;
+
+			case 2:
+				wake_up_interruptible(&wq_3);
+				break;
+
+			case 3:
+				wake_up_interruptible(&wq_4);
+					break;
 			}
 		}
 
-		if(count)
-			continue;
+	} while (count);
 
-		break;
-	}
-}
-
-// Handler 1
-static irqreturn_t handler_1(int irq, void *dev_id)
-{
-	#ifdef DEBUG
-	printk("<1>UIO48 - Interrupt received Chip 1\n");
-	#endif
-
-	common_handler(0);
-	return IRQ_HANDLED;
-}
-
-// Handler 2
-static irqreturn_t handler_2(int irq, void *dev_id)
-{
-	#ifdef DEBUG
-	printk("<1>UIO48 - Interrupt received Chip 2\n");
-	#endif
-
-	common_handler(1);
-	return IRQ_HANDLED;
-}
-
-// Handler 3
-static irqreturn_t handler_3(int irq, void *dev_id)
-{
-	#ifdef DEBUG
-	printk("<1>UIO48 - Interrupt received Chip 3\n");
-	#endif
-
-	common_handler(2);
-	return IRQ_HANDLED;
-}
-
-// Handler 4
-static irqreturn_t handler_4(int irq, void *dev_id)
-{
-	#ifdef DEBUG
-	printk("<1>UIO48 - Interrupt received Chip 4\n");
-	#endif
-
-	common_handler(3);
 	return IRQ_HANDLED;
 }
 
@@ -272,7 +223,7 @@ static int device_release(struct inode *inode, struct file *file)
 {
 	#ifdef DEBUG
 	printk ("<1>UIO48 - device_release(%p,%p)\n", inode, file);
-	#endif 
+	#endif
 
 	return 0;
 }
@@ -318,7 +269,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 			#ifdef DEBUG
 			printk("<1>UIO48 - Writing to I/O Port %04x with%02x\n", base_port[device]+port, ret_val);
 			#endif
-			
+
 			return SUCCESS;
 
 	    case IOCTL_READ_BIT:
@@ -343,12 +294,12 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 
 		case IOCTL_ENAB_INT:
 			device = minor + 1;
-			
+
 			#ifdef DEBUG
 			printk("<1>UIO48 - IOCTL Set_int Device %d Bit %d polarity %d\n",
 					device, (int)(ioctl_param>>8), (int)(ioctl_param & 0xff));
 			#endif
-			
+
 			enab_int(device, (int)(ioctl_param >> 8), (int)(ioctl_param&0xff));
 			return SUCCESS;
 
@@ -359,7 +310,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 			printk("<1>UIO48 - IOCTL Disab_Int Device %d Bit %d\n",
 					device, (int)(ioctl_param & 0xff));
 			#endif
-	
+
 			disab_int(device, (int)(ioctl_param & 0xff));
 			return SUCCESS;
 
@@ -369,12 +320,12 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 			#ifdef DEBUG
 			printk("<1>UIO48 - IOCTL Clr_int Device %d Bit %d\n", device, (int)(ioctl_param & 0xff));
 			#endif
-	
+
 			clr_int(device, (int)(ioctl_param & 0xff));
 			return SUCCESS;
 
 		case IOCTL_GET_INT:
-			device = minor + 1;	
+			device = minor + 1;
 
 			#ifdef DEBUG
 			printk("<1>UIO48 - IOCTL get_int device %d\n", device);
@@ -385,7 +336,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 
 		case IOCTL_WAIT_INT:
 			device = minor + 1;
-			
+
 			#ifdef DEBUG
 			printk("<1>UIO48 - IOCTL wait_int device %d\n", device);
 			#endif
@@ -403,15 +354,15 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 			case 0:
 				wait_event_interruptible(wq_1, 1);
 				break;
-	
+
 			case 1:
 				wait_event_interruptible(wq_2, 1);
 				break;
-			
+
 			case 2:
 				wait_event_interruptible(wq_3, 1);
 				break;
-	
+
 			case 3:
 				wait_event_interruptible(wq_4, 1);
 				break;
@@ -422,7 +373,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 			#endif
 
 			// Getting here does not guarantee that there's an in interrupt available
-			// we may have been awakened by some other signal. In any case We'll 
+			// we may have been awakened by some other signal. In any case We'll
 			// return whatever's available in the interrupt queue even if it's empty
 			i = get_buffered_int(minor + 1);
 
@@ -434,27 +385,27 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 			#ifdef DEBUG
 			printk("<1>UIO48 - IOCTL Clr_Int_Id Device %d Port %d\n", device, (int)(ioctl_param & 0xff));
 			#endif
-        
+
 			clr_int_id(device,(int)(ioctl_param&0xff));
 			return SUCCESS;
 
 		case IOCTL_LOCK_PORT:
 			device = minor + 1;
-			
+
 			#ifdef DEBUG
 			printk("<1>UIO48 - IOCTL Lock_Port Device %d Port %d\n", device, (int)(ioctl_param & 0xff));
 			#endif
-        
+
 			lock_port(device,(int)(ioctl_param&0xff));
 			return SUCCESS;
 
 		case IOCTL_UNLOCK_PORT:
 			device = minor + 1;
-		
+
 			#ifdef DEBUG
 			printk("<1>UIO48 - IOCTL Unock_Port Device %d Port %d\n", device, (int)(ioctl_param & 0xff));
 			#endif
-        
+
 			unlock_port(device,(int)(ioctl_param&0xff));
 			return SUCCESS;
 
@@ -468,7 +419,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 
 ///**********************************************************************
 //			Module Declarations
-// This structure will hold the functions to be called 
+// This structure will hold the functions to be called
 // when a process does something to the device
 ///**********************************************************************
 static struct file_operations uio48_fops = {
@@ -484,7 +435,8 @@ static struct file_operations uio48_fops = {
 // register the character device
 int init_module()
 {
-	int ret_val, x, io_num;
+	int ret_val, io_num;
+	unsigned long x;
 	dev_t devno;
 
 	// Sign-on
@@ -526,12 +478,12 @@ int init_module()
 
 			if(!ret_val)
 			{
-				printk("<1>UIO48 - Added character device %s node %d\n", DRVR_NAME, x);
+				printk("<1>UIO48 - Added character device %s node %ld\n", DRVR_NAME, x);
 				cdev_num++;
 			}
 			else
 			{
-				printk("<1>UIO48 - Error %d adding character device %s node %d\n", ret_val, DRVR_NAME, x);
+				printk("<1>UIO48 - Error %d adding character device %s node %ld\n", ret_val, DRVR_NAME, x);
 				goto exit_cdev_delete;
 			}
 		}
@@ -560,38 +512,13 @@ int init_module()
 				init_io(x, io[x]);
 				io_num++;
 			}
-		
+
 			// check and map any interrupts
 			if (irq[x]) {
-				switch (x) {
-				case 0:
-					if (request_irq(irq[x], handler_1, IRQF_SHARED, DRVR_NAME, RCSInfo))
-						printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-					else
-						printk("<1>UIO48 - IRQ %d registered to Chip 1\n", irq[x]);
-					break;
-		
-				case 1:
-					if( request_irq(irq[x], handler_2, IRQF_SHARED, DRVR_NAME, RCSInfo))
-						printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-					else
-						printk("<1>UIO48 - IRQ %d registered to Chip 2\n", irq[x]);
-					break;
-	
-				case 2:
-					if (request_irq(irq[x], handler_3, IRQF_SHARED, DRVR_NAME, RCSInfo))
-						printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-					else
-						printk("<1>UIO48 - IRQ %d registered to Chip 3\n", irq[x]);
-					break;
-	
-				case 3:
-					if (request_irq(irq[x], handler_4, IRQF_SHARED, DRVR_NAME, RCSInfo))
-						printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-					else
-						printk("<1>UIO48 - IRQ %d registered to Chip 4\n", irq[x]);
-					break;
-				}
+				if (request_irq(irq[x], common_handler, IRQF_SHARED, DRVR_NAME, (void *)x))
+					printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
+				else
+					printk("<1>UIO48 - IRQ %d registered to Chip %ld\n", irq[x], x + 1);
 			}
 		}
 	}
@@ -605,7 +532,7 @@ int init_module()
 	return SUCCESS;
 
 exit_cdev_delete:
-	while (cdev_num) 
+	while (cdev_num)
 		cdev_del(&uio48_cdev[--cdev_num]);
 
 	unregister_chrdev_region(devno, 1);
@@ -627,7 +554,7 @@ void cleanup_module()
 		if(io[x])
 		{
 			release_region(io[x], 0x10);
-	
+
 			if(irq[x]) free_irq(irq[x], RCSInfo);
 		}
 	}
@@ -640,7 +567,7 @@ void cleanup_module()
 
 	unregister_chrdev_region(MKDEV(uio48_major, 0), 1);
 	uio48_major = 0;
-}  
+}
 
 // ******************* Device Subroutines *****************************
 // This array holds the image values of the last write to each I/O port
@@ -655,26 +582,26 @@ static void init_io(int chip_number, unsigned io_address)
 	// obtain lock
 	mutex_lock_interruptible(&mtx[chip_number]);
 
-	// save the address for later use 
+	// save the address for later use
 	base_port[chip_number] = io_address;
 
-	// Clear all of the I/O ports. This also makes them inputs 
+	// Clear all of the I/O ports. This also makes them inputs
 	for(x=0; x < 7; x++)
 		outb(0,base_port[chip_number]+x);
 
-	// Clear the image values as well 
+	// Clear the image values as well
 	for(x=0; x < 6; x++)
 		port_images[chip_number][x] = 0;
 
-	// Set page 2 access, for interrupt enables 
+	// Set page 2 access, for interrupt enables
 	outb(PAGE2 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
-	// Clear all interrupt enables 
+	// Clear all interrupt enables
 	outb(0,base_port[chip_number] + 8);
 	outb(0,base_port[chip_number] + 9);
 	outb(0,base_port[chip_number] + 0x0a);
 
-	// Restore page 0 register access 
+	// Restore page 0 register access
 	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
 	//release lock
@@ -686,19 +613,19 @@ static int read_bit(int chip_number, int bit_number)
 	unsigned port;
 	int val;
 
-	// Adjust chip number to zero based addressing 
+	// Adjust chip number to zero based addressing
 	--chip_number;
 
-	// Adjust bit_number to 0 to 47 numbering 
+	// Adjust bit_number to 0 to 47 numbering
 	--bit_number;
 
-	// Calculate the I/O port address based on the updated bit_number 
+	// Calculate the I/O port address based on the updated bit_number
 	port = (bit_number / 8) + base_port[chip_number];
 
-	// Get the current contents of the port 
+	// Get the current contents of the port
 	val = inb(port);
 
-	// Get just the bit we specified 
+	// Get just the bit we specified
 	val = val & (1 << (bit_number % 8));
 
 	if(val)
@@ -713,34 +640,34 @@ static void write_bit(int chip_number, int bit_number, int val)
 	unsigned temp;
 	unsigned mask;
 
-	// Adjust the chip number for 0 based numbering 
+	// Adjust the chip number for 0 based numbering
 	--chip_number;
 
-	// Adjust bit number for 0 based numbering 
+	// Adjust bit number for 0 based numbering
 	--bit_number;
 
 	// obtain lock before writing
 	mutex_lock_interruptible(&mtx[chip_number]);
 
-	// Calculate the I/O address of the port based on the bit number 
+	// Calculate the I/O address of the port based on the bit number
 	port = (bit_number / 8) + base_port[chip_number];
 
-	// Use the image value to avoid having to read the port first 
-	temp = port_images[chip_number][bit_number / 8]; 
+	// Use the image value to avoid having to read the port first
+	temp = port_images[chip_number][bit_number / 8];
 
-	// Calculate a bit mask for the specified bit 
+	// Calculate a bit mask for the specified bit
 	mask = (1 << (bit_number % 8));
 
-	// check whether the request was to set or clear and mask accordingly 
-	if(val)		// If the bit needs to be set 
+	// check whether the request was to set or clear and mask accordingly
+	if(val)		// If the bit needs to be set
 		temp = temp | mask;
 	else
 		temp = temp & ~mask;
 
-	// Update the image value with the value we're about to write 
+	// Update the image value with the value we're about to write
 	port_images[chip_number][bit_number /8] = temp;
 
-	// Now actally update the port. Only the specified bit is affected 
+	// Now actally update the port. Only the specified bit is affected
 	outb(temp, port);
 
 	//release lock
@@ -763,37 +690,37 @@ static void enab_int(int chip_number, int bit_number, int polarity)
 	unsigned temp;
 	unsigned mask;
 
-	// Adjust for 0 based numbering 
+	// Adjust for 0 based numbering
 	--chip_number;
 
-	// Also adjust bit number 
+	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
 	mutex_lock_interruptible(&mtx[chip_number]);
 
-	// Calculate the I/O address based upon bit number 
+	// Calculate the I/O address based upon bit number
 	port = (bit_number / 8) + base_port[chip_number] + 8;
 
-	// Calculate a bit mask based upon the specified bit number 
+	// Calculate a bit mask based upon the specified bit number
 	mask = (1 << (bit_number % 8));
 
-	// Turn on page 2 access 
+	// Turn on page 2 access
 	outb(PAGE2 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
-	// Get the current state of the interrupt enable register 
+	// Get the current state of the interrupt enable register
 	temp = inb(port);
 
-	// Set the enable bit for our bit number 
+	// Set the enable bit for our bit number
 	temp = temp | mask;
 
-	// Now update the interrupt enable register 
+	// Now update the interrupt enable register
 	outb(temp,port);
 
-	// Turn on access to page 1 for polarity control 
+	// Turn on access to page 1 for polarity control
 	outb(PAGE1 | (~PAGE3 & inb(base_port[chip_number] + 7)), base_port[chip_number] + 7);
 
-	// Get the current state of the polarity register 
+	// Get the current state of the polarity register
 	temp = inb(port);
 
 	// Set the polarity according to the argument in the image value
@@ -802,10 +729,10 @@ static void enab_int(int chip_number, int bit_number, int polarity)
     else
 	    temp = temp & ~mask;
 
-	// Write out the new polarity value 
+	// Write out the new polarity value
 	outb(temp, port);
 
-	// Set access back to page 0 
+	// Set access back to page 0
 	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
 	//release lock
@@ -818,34 +745,34 @@ static void disab_int(int chip_number, int bit_number)
 	unsigned temp;
 	unsigned mask;
 
-	// Adjust for 0 based numbering 
+	// Adjust for 0 based numbering
 	--chip_number;
 
-	// Also adjust bit number 
+	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
 	mutex_lock_interruptible(&mtx[chip_number]);
 
-	// Calculate the I/O address based upon bit number 
+	// Calculate the I/O address based upon bit number
 	port = (bit_number / 8) + base_port[chip_number] + 8;
 
-	// Calculate a bit mask based upon the specified bit number 
+	// Calculate a bit mask based upon the specified bit number
 	mask = (1 << (bit_number % 8));
 
-	// Turn on page 2 access 
+	// Turn on page 2 access
 	outb(PAGE2 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
-	// Get the current state of the interrupt enable register 
+	// Get the current state of the interrupt enable register
 	temp = inb(port);
 
-	// clear the enable bit for our bit number 
+	// clear the enable bit for our bit number
 	temp = temp & ~mask;
 
-	// Now update the interrupt enable register 
+	// Now update the interrupt enable register
 	outb(temp, port);
 
-	// Set access back to page 0 
+	// Set access back to page 0
 	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
 	//release lock
@@ -858,40 +785,40 @@ static void clr_int(int chip_number, int bit_number)
 	unsigned temp;
 	unsigned mask;
 
-	// Adjust for 0 based numbering 
+	// Adjust for 0 based numbering
 	--chip_number;
 
-	// Also adjust bit number 
+	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
 	spin_lock(&spnlck[chip_number]);
 	//mutex_lock_interruptible(&mtx[chip_number]);
 
-	// Calculate the I/O address based upon bit number 
+	// Calculate the I/O address based upon bit number
 	port = (bit_number / 8) + base_port[chip_number] + 8;
 
-	// Calculate a bit mask based upon the specified bit number 
+	// Calculate a bit mask based upon the specified bit number
 	mask = (1 << (bit_number % 8));
 
-	// Turn on page 2 access 
+	// Turn on page 2 access
 	outb(PAGE2 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
-	// Get the current state of the interrupt enable register 
+	// Get the current state of the interrupt enable register
 	temp = inb(port);
 
-	// Temporarily clear only our enable. This clears the interrupt 
-	temp = temp & ~mask;    // Clear the enable for this bit 
+	// Temporarily clear only our enable. This clears the interrupt
+	temp = temp & ~mask;    // Clear the enable for this bit
 
-	// Now update the interrupt enable register 
+	// Now update the interrupt enable register
 	outb(temp, port);
 
-	// Re-enable our interrupt bit 
+	// Re-enable our interrupt bit
 	temp = temp | mask;
 
 	outb(temp, port);
 
-	// Set access back to page 0 
+	// Set access back to page 0
 	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
 	//release lock
@@ -904,7 +831,7 @@ static int get_int(int chip_number)
 	int temp;
 	int x;
 
-	// Adjust the chip number for 0 based numbering 
+	// Adjust the chip number for 0 based numbering
 	--chip_number;
 
 	// obtain lock
@@ -912,10 +839,10 @@ static int get_int(int chip_number)
 	//mutex_lock_interruptible(&mtx[chip_number]);
 
 	// Read the master interrupt pending register,
-	// mask off undefined bits 
+	// mask off undefined bits
 	temp = inb(base_port[chip_number]+6) & 0x07;
 
-	// If there are no pending interrupts, return 0 
+	// If there are no pending interrupts, return 0
 	if((temp & 7) == 0)
 	{
 		spin_unlock(&spnlck[chip_number]);
@@ -923,13 +850,13 @@ static int get_int(int chip_number)
 		return 0;
 	}
 
-	// Set access to page 3 for interrupt id register 
+	// Set access to page 3 for interrupt id register
 	outb(PAGE3 | inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
-	// Read the interrupt ID register for port 0 
+	// Read the interrupt ID register for port 0
 	temp = inb(base_port[chip_number]+8);
 
-	// See if any bit set, if so return the bit number 
+	// See if any bit set, if so return the bit number
 	if(temp != 0)
 	{
 	    for(x=0; x<=7; x++)
@@ -944,10 +871,10 @@ static int get_int(int chip_number)
         }
 	}
 
-	// None in port 0, read port 1 interrupt ID register 
+	// None in port 0, read port 1 interrupt ID register
 	temp = inb(base_port[chip_number]+9);
 
-	// See if any bit set, if so return the bit number 
+	// See if any bit set, if so return the bit number
 	if(temp != 0)
 	{
 	    for(x=0; x<=7; x++)
@@ -962,10 +889,10 @@ static int get_int(int chip_number)
 	    }
 	}
 
-	// Lastly, read the statur of port 2 interrupt ID register 
+	// Lastly, read the statur of port 2 interrupt ID register
 	temp = inb(base_port[chip_number]+0x0a);
 
-	// If any pending, return the appropriate bit number 
+	// If any pending, return the appropriate bit number
 	if(temp != 0)
 	{
 	    for(x=0; x<=7; x++)
@@ -982,7 +909,7 @@ static int get_int(int chip_number)
 
 	// We should never get here unless the hardware is seriously
 	// misbehaving, but just to be sure, we'll turn the page access
-	// back to 0 and return a 0 for no interrupt found 
+	// back to 0 and return a 0 for no interrupt found
 
 	outb(~PAGE3 & inb(base_port[chip_number] + 7), base_port[chip_number] + 7);
 
@@ -996,7 +923,7 @@ static int get_buffered_int(int chip_number)
 {
 	int temp;
 
-	// Adjust for 0 based numbering 
+	// Adjust for 0 based numbering
 	--chip_number;
 
 	if(irq[chip_number] == 0)
@@ -1005,7 +932,7 @@ static int get_buffered_int(int chip_number)
 
 		if(temp)
 			clr_int(chip_number+1, temp);
-	    
+
 		return temp;
 	}
 
@@ -1015,7 +942,7 @@ static int get_buffered_int(int chip_number)
 
 		if(outptr[chip_number] == MAX_INTS)
 			outptr[chip_number] = 0;
-	
+
 		return temp;
 	}
 
