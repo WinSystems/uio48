@@ -121,16 +121,9 @@ static struct uio48_dev uiodevs[MAX_CHIPS];
 static irqreturn_t irq_handler(int __irq, void *dev_id)
 {
 	struct uio48_dev *uiodev = dev_id;
+	int c;
 
-	while (1) {
-		int c;
-
-		// obtain irq bit
-		c = get_int(uiodev);
-
-		if (c == 0)
-			break;
-
+	while ((c = get_int(uiodev))) {
 		clr_int(uiodev, c);
 
 		pr_devel("Interrupt on chip %d, bit %d\n", uiodev->id, c);
@@ -251,7 +244,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 		return SUCCESS;
 
 	case IOCTL_GET_INT:
-		pr_devel("IOCTL get_int device %d\n", minor + 1);
+		pr_devel("IOCTL get_buffered_int device %d\n", minor + 1);
 
 		i = get_buffered_int(uiodev);
 		return i;
@@ -676,76 +669,44 @@ static int get_int(struct uio48_dev *uiodev)
 	int temp;
 	int x;
 
-	// obtain lock
 	spin_lock(&uiodev->spnlck);
 
-	// Read the master interrupt pending register,
-	// mask off undefined bits
+	/* Read the master interrupt pending register, mask off undefined
+	 * bits. */
 	temp = inb(base_port + 6) & 0x07;
 
-	// If there are no pending interrupts, return 0
-	if ((temp & 7) == 0) {
+	/* If there are no pending interrupts, return 0. */
+	if (temp == 0) {
 		spin_unlock(&uiodev->spnlck);
 		return 0;
 	}
 
-	// Set access to page 3 for interrupt id register
+	/* Set access to page 3 for interrupt id register. */
 	outb(PAGE3 | inb(base_port + 7), base_port + 7);
 
-	// Read the interrupt ID register for port 0
-	temp = inb(base_port + 8);
+	/* Check ports 0, 1, and 2 for interrupt ID register. */
+	for (x = 0; x < 3; x++) {
+		int t;
 
-	// See if any bit set, if so return the bit number
-	if(temp != 0)
-	{
-	    for(x=0; x<=7; x++)
-	    {
-			if(temp & (1 << x))
-			{
-				outb(~PAGE3 & inb(base_port + 7), base_port + 7);
-				spin_unlock(&uiodev->spnlck);
-				return(x+1);
-            }
-        }
+		/* Read the interrupt ID register for port. */
+		temp = inb(base_port + 8 + x);
+
+		/* See if any bit set, if so return the bit number. */
+		if (temp == 0)
+			continue;
+
+		for (t = 0; t <= 7; t++) {
+			if (!(temp & (1 << t)))
+				continue;
+			outb(~PAGE3 & inb(base_port + 7), base_port + 7);
+			spin_unlock(&uiodev->spnlck);
+			return (t + 1 + (8 * x));
+		}
 	}
 
-	// None in port 0, read port 1 interrupt ID register
-	temp = inb(base_port + 9);
-
-	// See if any bit set, if so return the bit number
-	if(temp != 0)
-	{
-	    for(x=0; x<=7; x++)
-		{
-			if(temp & (1 << x))
-			{
-				outb(~PAGE3 & inb(base_port + 7), base_port + 7);
-				spin_unlock(&uiodev->spnlck);
-				return(x+9);
-			}
-	    }
-	}
-
-	// Lastly, read the statur of port 2 interrupt ID register
-	temp = inb(base_port + 0x0a);
-
-	// If any pending, return the appropriate bit number
-	if(temp != 0)
-	{
-	    for(x=0; x<=7; x++)
-	    {
-			if(temp & (1 << x))
-			{
-				outb(~PAGE3 & inb(base_port + 7), base_port + 7);
-				spin_unlock(&uiodev->spnlck);
-				return(x + 17);
-			}
-	    }
-	}
-
-	// We should never get here unless the hardware is seriously
-	// misbehaving, but just to be sure, we'll turn the page access
-	// back to 0 and return a 0 for no interrupt found
+	/* We should never get here unless the hardware is seriously
+	 * misbehaving, but just to be sure, we'll turn the page access
+	 * back to 0 and return a 0 for no interrupt found. */
 
 	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 

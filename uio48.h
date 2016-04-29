@@ -33,8 +33,8 @@
 //
 ///****************************************************************************
 
-#ifndef CHARDEV_H
-  #define CHARDEV_H
+#ifndef __UIO48_H
+#define __UIO48_H
 
 #include <linux/ioctl.h> 
 
@@ -86,4 +86,4 @@
 /* UNLOCK_PORT function */
 #define	IOCTL_UNLOCK_PORT _IOWR(IOCTL_NUM, 14, int)
 
-#endif
+#endif /* __UIO48_H */
