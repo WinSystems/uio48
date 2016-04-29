@@ -59,10 +59,9 @@ static char *RCSInfo = "$Id: uio48.c, v 4.0 2011-06-14 paul Exp $";
 #include <linux/cdev.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
-	#include <linux/autoconf.h>
-# else
-	#include <generated/autoconf.h>
+#include <linux/autoconf.h>
 #endif
 
 #include "uio48.h"
