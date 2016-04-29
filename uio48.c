@@ -352,6 +352,9 @@ int init_module()
 		// initialize spinlock array
 		spin_lock_init(&uiodev->spnlck);
 
+		/* Initialize wait queue */
+		init_waitqueue_head(&uiodev->wq);
+
 		uiodev->id = x;
 
 		// Initialize char device
