@@ -74,27 +74,25 @@ static char *RCSInfo = "$Id: uio48.c, v 4.0 2011-06-14 paul Exp $";
 //#define DEBUG 1
 
 // Function prototypes for local functions 
-void init_io(int chip_number, unsigned io_address);
-int read_bit(int chip_number, int bit_number);
-void write_bit(int chip_number, int bit_number, int val);
-void UIO48_set_bit(int chip_num, int bit_num);
-void clr_bit(int chip_num, int bit_num);
-void enab_int(int chip_number, int bit_number, int polarity);
-void disab_int(int chip_number, int bit_number);
-void clr_int(int chip_number, int bit_number);
-int get_int(int chip_number);
-int get_buffered_int(int chip_number);
-void clr_int_id(int chip_number, int port_number);
-void lock_port(int chip_number, int port_number);
-void unlock_port(int chip_number, int port_number);
+static void init_io(int chip_number, unsigned io_address);
+static int read_bit(int chip_number, int bit_number);
+static void write_bit(int chip_number, int bit_number, int val);
+static void UIO48_set_bit(int chip_num, int bit_num);
+static void clr_bit(int chip_num, int bit_num);
+static void enab_int(int chip_number, int bit_number, int polarity);
+static void disab_int(int chip_number, int bit_number);
+static void clr_int(int chip_number, int bit_number);
+static int get_int(int chip_number);
+static int get_buffered_int(int chip_number);
+static void clr_int_id(int chip_number, int port_number);
+static void lock_port(int chip_number, int port_number);
+static void unlock_port(int chip_number, int port_number);
 
 // Interrupt handlers 
-irqreturn_t handler_1(int, void *);
-irqreturn_t handler_2(int, void *);
-irqreturn_t handler_3(int, void *);
-irqreturn_t handler_4(int, void *);
-
-void common_handler(int);
+static irqreturn_t handler_1(int, void *);
+static irqreturn_t handler_2(int, void *);
+static irqreturn_t handler_3(int, void *);
+static irqreturn_t handler_4(int, void *);
 
 // ******************* Device Declarations *****************************
 
@@ -109,7 +107,7 @@ static struct cdev uio48_cdev[MAX_CHIPS];
 static int cdev_num;
 
 // This holds the base addresses of the IO chips
-unsigned base_port[MAX_CHIPS] = {0,0,0,0};
+static unsigned base_port[MAX_CHIPS];
 
 // Page defintions
 #define PAGE0		0x0
@@ -118,27 +116,23 @@ unsigned base_port[MAX_CHIPS] = {0,0,0,0};
 #define PAGE3		0xc0
 
 // Our modprobe command line arguments
-static int arr_argc_io = 0;
-static int arr_argc_irq = 0;
-static unsigned io[MAX_CHIPS] = {0,0,0,0};
-static unsigned irq[MAX_CHIPS] = {0,0,0,0};
+static unsigned io[MAX_CHIPS];
+static unsigned irq[MAX_CHIPS];
 
-module_param_array(io, ushort, &arr_argc_io, S_IRUGO);
-module_param_array(irq, ushort, &arr_argc_irq, S_IRUGO);
-
-unsigned int_count[MAX_CHIPS] = {0,0,0,0};
+module_param_array(io, uint, NULL, S_IRUGO);
+module_param_array(irq, uint, NULL, S_IRUGO);
 
 // We will buffer up the transition interrupts and will pass them on
 // to waiting applications
-unsigned char int_buffer[MAX_CHIPS][MAX_INTS];
-int inptr[MAX_CHIPS] = {0,0,0,0};
-int outptr[MAX_CHIPS] = {0,0,0,0};
+static unsigned char int_buffer[MAX_CHIPS][MAX_INTS];
+static int inptr[MAX_CHIPS];
+static int outptr[MAX_CHIPS];
 
 // These declarations create the wait queues. One for each supported device
-DECLARE_WAIT_QUEUE_HEAD(wq_1);
-DECLARE_WAIT_QUEUE_HEAD(wq_2);
-DECLARE_WAIT_QUEUE_HEAD(wq_3);
-DECLARE_WAIT_QUEUE_HEAD(wq_4);
+static DECLARE_WAIT_QUEUE_HEAD(wq_1);
+static DECLARE_WAIT_QUEUE_HEAD(wq_2);
+static DECLARE_WAIT_QUEUE_HEAD(wq_3);
+static DECLARE_WAIT_QUEUE_HEAD(wq_4);
 
 // mutex & spinlock
 static struct mutex mtx[MAX_CHIPS];
@@ -146,7 +140,7 @@ static spinlock_t spnlck[MAX_CHIPS];
 
 // This is the common interrupt handler. It is called by the chip specific
 // handlers with the device number as an argument
-void common_handler(int device)
+static void common_handler(int device)
 {
 	int my_interrupt, x, c, count;
 
@@ -177,24 +171,23 @@ void common_handler(int device)
 					if(inptr[x] == MAX_INTS)
 						inptr[x] = 0;
 
-					switch(x)
-					{	
-						case 0:
-							wake_up_interruptible(&wq_1);
-							break;
-				
-						case 1:
-							wake_up_interruptible(&wq_2);
-							break;
-				
-						case 2:
-							wake_up_interruptible(&wq_3);
-							break;
-				
-						case 3:
-							wake_up_interruptible(&wq_4);
-							break;
-		    		}
+					switch (x) {	
+					case 0:
+						wake_up_interruptible(&wq_1);
+						break;
+			
+					case 1:
+						wake_up_interruptible(&wq_2);
+						break;
+			
+					case 2:
+						wake_up_interruptible(&wq_3);
+						break;
+			
+					case 3:
+						wake_up_interruptible(&wq_4);
+						break;
+		    			}
 				}
 			}
 		}
@@ -207,7 +200,7 @@ void common_handler(int device)
 }
 
 // Handler 1
-irqreturn_t handler_1(int irq, void *dev_id)
+static irqreturn_t handler_1(int irq, void *dev_id)
 {
 	#ifdef DEBUG
 	printk("<1>UIO48 - Interrupt received Chip 1\n");
@@ -218,7 +211,7 @@ irqreturn_t handler_1(int irq, void *dev_id)
 }
 
 // Handler 2
-irqreturn_t handler_2(int irq, void *dev_id)
+static irqreturn_t handler_2(int irq, void *dev_id)
 {
 	#ifdef DEBUG
 	printk("<1>UIO48 - Interrupt received Chip 2\n");
@@ -229,7 +222,7 @@ irqreturn_t handler_2(int irq, void *dev_id)
 }
 
 // Handler 3
-irqreturn_t handler_3(int irq, void *dev_id)
+static irqreturn_t handler_3(int irq, void *dev_id)
 {
 	#ifdef DEBUG
 	printk("<1>UIO48 - Interrupt received Chip 3\n");
@@ -240,7 +233,7 @@ irqreturn_t handler_3(int irq, void *dev_id)
 }
 
 // Handler 4
-irqreturn_t handler_4(int irq, void *dev_id)
+static irqreturn_t handler_4(int irq, void *dev_id)
 {
 	#ifdef DEBUG
 	printk("<1>UIO48 - Interrupt received Chip 4\n");
@@ -275,7 +268,7 @@ static int device_open(struct inode *inode, struct file *file)
 //			DEVICE CLOSE
 ///**********************************************************************
 
-int device_release(struct inode *inode, struct file *file)
+static int device_release(struct inode *inode, struct file *file)
 {
 	#ifdef DEBUG
 	printk ("<1>UIO48 - device_release(%p,%p)\n", inode, file);
@@ -287,10 +280,14 @@ int device_release(struct inode *inode, struct file *file)
 ///**********************************************************************
 //			DEVICE IOCTL
 ///**********************************************************************
-long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl_param)
+static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl_param)
 {
 	int i, device, port, ret_val;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 	unsigned int minor = MINOR(file->f_dentry->d_inode->i_rdev);
+#else
+	unsigned int minor = MINOR(file_inode(file)->i_rdev);
+#endif
 
 	#ifdef DEBUG
 	printk("<1>UIO48 - IOCTL call minor %d,IOCTL CODE %04X\n",minor,ioctl_num);
@@ -371,7 +368,6 @@ long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl
 
 			#ifdef DEBUG
 			printk("<1>UIO48 - IOCTL Clr_int Device %d Bit %d\n", device, (int)(ioctl_param & 0xff));
-			printk("<1>UIO48 - Int_count = %d\n", int_count[minor]);
 			#endif
 	
 			clr_int(device, (int)(ioctl_param & 0xff));
@@ -402,24 +398,23 @@ long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl
 			printk("<1>UIO48 : current process %i (%s) going to sleep\n",
 					current->pid, current->comm);
 			#endif
+
+			switch (minor) {
+			case 0:
+				wait_event_interruptible(wq_1, 1);
+				break;
 	
-			switch(minor)
-			{
-				case 0:
-					interruptible_sleep_on(&wq_1);
-					break;
-		
-				case 1:
-					interruptible_sleep_on(&wq_2);
-					break;
-				
-				case 2:
-					interruptible_sleep_on(&wq_3);
-					break;
-		
-				case 3:
-					interruptible_sleep_on(&wq_4);
-					break;
+			case 1:
+				wait_event_interruptible(wq_2, 1);
+				break;
+			
+			case 2:
+				wait_event_interruptible(wq_3, 1);
+				break;
+	
+			case 3:
+				wait_event_interruptible(wq_4, 1);
+				break;
 			}
 
 			#ifdef DEBUG
@@ -476,11 +471,11 @@ long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl
 // This structure will hold the functions to be called 
 // when a process does something to the device
 ///**********************************************************************
-struct file_operations uio48_fops = {
-	owner:				THIS_MODULE,
+static struct file_operations uio48_fops = {
+	owner:			THIS_MODULE,
 	unlocked_ioctl:		device_ioctl,
-	open:				device_open,
-	release:			device_release,
+	open:			device_open,
+	release:		device_release,
 };
 
 ///**********************************************************************
@@ -567,37 +562,35 @@ int init_module()
 			}
 		
 			// check and map any interrupts
-			if(irq[x])
-	        {
-			    switch(x)
-			    {
-					case 0:
-						if(request_irq(irq[x], handler_1, IRQF_SHARED, DRVR_NAME, RCSInfo))
-							printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-						else
-							printk("<1>UIO48 - IRQ %d registered to Chip 1\n", irq[x]);
-						break;
+			if (irq[x]) {
+				switch (x) {
+				case 0:
+					if (request_irq(irq[x], handler_1, IRQF_SHARED, DRVR_NAME, RCSInfo))
+						printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
+					else
+						printk("<1>UIO48 - IRQ %d registered to Chip 1\n", irq[x]);
+					break;
 		
-					case 1:
-						if(request_irq(irq[x], handler_2, IRQF_SHARED, DRVR_NAME, RCSInfo))
-							printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-						else
-							printk("<1>UIO48 - IRQ %d registered to Chip 2\n", irq[x]);
-						break;
-		
-					case 2:
-						if(request_irq(irq[x], handler_3, IRQF_SHARED, DRVR_NAME, RCSInfo))
-							printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-						else
-							printk("<1>UIO48 - IRQ %d registered to Chip 3\n", irq[x]);
-						break;
-		
-					case 3:
-						if(request_irq(irq[x], handler_4, IRQF_SHARED, DRVR_NAME, RCSInfo))
-							printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
-						else
-							printk("<1>UIO48 - IRQ %d registered to Chip 4\n", irq[x]);
-						break;
+				case 1:
+					if( request_irq(irq[x], handler_2, IRQF_SHARED, DRVR_NAME, RCSInfo))
+						printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
+					else
+						printk("<1>UIO48 - IRQ %d registered to Chip 2\n", irq[x]);
+					break;
+	
+				case 2:
+					if (request_irq(irq[x], handler_3, IRQF_SHARED, DRVR_NAME, RCSInfo))
+						printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
+					else
+						printk("<1>UIO48 - IRQ %d registered to Chip 3\n", irq[x]);
+					break;
+	
+				case 3:
+					if (request_irq(irq[x], handler_4, IRQF_SHARED, DRVR_NAME, RCSInfo))
+						printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
+					else
+						printk("<1>UIO48 - IRQ %d registered to Chip 4\n", irq[x]);
+					break;
 				}
 			}
 		}
@@ -653,9 +646,9 @@ void cleanup_module()
 // This array holds the image values of the last write to each I/O port
 // This allows bit manipulation routines to work without having to actually do
 // a read-modify-write to the I/O port
-unsigned char port_images[MAX_CHIPS][6];
+static unsigned char port_images[MAX_CHIPS][6];
 
-void init_io(int chip_number, unsigned io_address)
+static void init_io(int chip_number, unsigned io_address)
 {
 	int x;
 
@@ -688,7 +681,7 @@ void init_io(int chip_number, unsigned io_address)
 	mutex_unlock(&mtx[chip_number]);
 }
 
-int read_bit(int chip_number, int bit_number)
+static int read_bit(int chip_number, int bit_number)
 {
 	unsigned port;
 	int val;
@@ -714,7 +707,7 @@ int read_bit(int chip_number, int bit_number)
 	return 0;
 }
 
-void write_bit(int chip_number, int bit_number, int val)
+static void write_bit(int chip_number, int bit_number, int val)
 {
 	unsigned port;
 	unsigned temp;
@@ -754,17 +747,17 @@ void write_bit(int chip_number, int bit_number, int val)
 	mutex_unlock(&mtx[chip_number]);
 }
 
-void UIO48_set_bit(int chip_num, int bit_num)
+static void UIO48_set_bit(int chip_num, int bit_num)
 {
 	write_bit(chip_num, bit_num, 1);
 }
 
-void clr_bit(int chip_num, int bit_num)
+static void clr_bit(int chip_num, int bit_num)
 {
 	write_bit(chip_num, bit_num, 0);
 }
 
-void enab_int(int chip_number, int bit_number, int polarity)
+static void enab_int(int chip_number, int bit_number, int polarity)
 {
 	unsigned port;
 	unsigned temp;
@@ -819,7 +812,7 @@ void enab_int(int chip_number, int bit_number, int polarity)
 	mutex_unlock(&mtx[chip_number]);
 }
 
-void disab_int(int chip_number, int bit_number)
+static void disab_int(int chip_number, int bit_number)
 {
 	unsigned port;
 	unsigned temp;
@@ -859,7 +852,7 @@ void disab_int(int chip_number, int bit_number)
 	mutex_unlock(&mtx[chip_number]);
 }
 
-void clr_int(int chip_number, int bit_number)
+static void clr_int(int chip_number, int bit_number)
 {
 	unsigned port;
 	unsigned temp;
@@ -906,7 +899,7 @@ void clr_int(int chip_number, int bit_number)
 	//mutex_unlock(&mtx[chip_number]);
 }
 
-int get_int(int chip_number)
+static int get_int(int chip_number)
 {
 	int temp;
 	int x;
@@ -919,7 +912,7 @@ int get_int(int chip_number)
 	//mutex_lock_interruptible(&mtx[chip_number]);
 
 	// Read the master interrupt pending register,
-    // mask off undefined bits 
+	// mask off undefined bits 
 	temp = inb(base_port[chip_number]+6) & 0x07;
 
 	// If there are no pending interrupts, return 0 
@@ -999,7 +992,7 @@ int get_int(int chip_number)
 	return 0;
 }
 
-int get_buffered_int(int chip_number)
+static int get_buffered_int(int chip_number)
 {
 	int temp;
 
@@ -1029,7 +1022,7 @@ int get_buffered_int(int chip_number)
 	return 0;
 }
 
-void clr_int_id(int chip_number, int port_number)
+static void clr_int_id(int chip_number, int port_number)
 {
 	// Adjust the chip number for 0 based numbering
 	--chip_number;
@@ -1050,7 +1043,7 @@ void clr_int_id(int chip_number, int port_number)
 	mutex_unlock(&mtx[chip_number]);
 }
 
-void lock_port(int chip_number, int port_number)
+static void lock_port(int chip_number, int port_number)
 {
 	// Adjust the chip number for 0 based numbering
 	--chip_number;
@@ -1065,7 +1058,7 @@ void lock_port(int chip_number, int port_number)
 	mutex_unlock(&mtx[chip_number]);
 }
 
-void unlock_port(int chip_number, int port_number)
+static void unlock_port(int chip_number, int port_number)
 {
 	// Adjust the chip number for 0 based numbering
 	--chip_number;
