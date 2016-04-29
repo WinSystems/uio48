@@ -37,16 +37,7 @@
 
 static char *RCSInfo = "$Id: uio48.c, v 4.0 2011-06-14 paul Exp $";
 
-#ifndef __KERNEL__
-	#define __KERNEL__
-#endif
-
-#ifndef MODULE
-	#define MODULE
-#endif
-
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/version.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -60,20 +51,14 @@ static char *RCSInfo = "$Id: uio48.c, v 4.0 2011-06-14 paul Exp $";
 #include <asm/io.h>
 #include <asm/uaccess.h>
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
-#include <linux/autoconf.h>
-#endif
-
 #include "uio48.h"
 
 #define DRVR_NAME	"uio48"
-#define DRVR_VERSION	"4.0"
-#define DRVR_RELDATE	"1Dec2011"
 
 // #define DEBUG 1
 
 #ifdef DEBUG
-#define pr_dbg(...) printk("<1>UIO48 -" __VA_ARGS__)
+#define pr_dbg(...) printk(KERN_DEBUG "UIO48: " __VA_ARGS__)
 #else
 #define pr_dbg(...) do{}while(0)
 #endif
@@ -171,7 +156,7 @@ static int device_open(struct inode *inode, struct file *file)
 	struct uio48_dev *uiodev = &uiodevs[minor];
 
 	if (uiodev->base_port == 0) {
-		printk("<1>UIO48 **** OPEN ATTEMPT on uninitialized port *****\n");
+		printk(KERN_WARNING "UIO48 **** OPEN ATTEMPT on uninitialized port *****\n");
 		return -1;
 	}
 
@@ -341,9 +326,9 @@ int init_module()
 	int x;
 
 	// Sign-on
-	printk("<1>WinSystems, Inc. UIO48 Linux Device Driver\n");
-	printk("<1>Copyright 2002-2011, All rights reserved\n");
-	printk("<1>%s\n", RCSInfo);
+	printk(KERN_INFO "WinSystems, Inc. UIO48 Linux Device Driver\n");
+	printk(KERN_INFO "Copyright 2002-2011, All rights reserved\n");
+	printk(KERN_INFO "%s\n", RCSInfo);
 
 	// register the character device
 	if (uio48_init_major) {
@@ -356,10 +341,10 @@ int init_module()
 	}
 
 	if (ret_val < 0) {
-		printk("<1>UIO48 - Cannot obtain major number %d\n", uio48_major);
+		printk(KERN_ERR "UIO48: Cannot obtain major number %d\n", uio48_major);
 		return -ENODEV;
 	} else {
-		printk("<1>UIO48 - Major number %d assigned\n", uio48_major);
+		printk(KERN_INFO "UIO48: Major number %d assigned\n", uio48_major);
 	}
 
 	for (x = io_num = 0; x < MAX_CHIPS; x++) {
@@ -383,19 +368,19 @@ int init_module()
 		ret_val = cdev_add(&uiodev->uio48_cdev, MKDEV(uio48_major, x), MAX_CHIPS);
 
 		if (!ret_val) {
-			printk("<1>UIO48 - Added character device %s node %d\n", DRVR_NAME, x);
+			printk(KERN_INFO "UIO48: Added character device %s node %d\n", DRVR_NAME, x);
 		} else {
-			printk("<1>UIO48 - Error %d adding character device %s node %d\n", ret_val, DRVR_NAME, x);
+			printk(KERN_ERR "UIO48: Error %d adding character device %s node %d\n", ret_val, DRVR_NAME, x);
 			goto exit_cdev_delete;
 		}
 
 		// check and map our I/O region requests
 		if (request_region(io[x], 0x10, DRVR_NAME) == NULL) {
-			printk("<1>UIO48 - Unable to use I/O Address %04X\n", io[x]);
+			printk(KERN_ERR "UIO48: Unable to use I/O Address %04X\n", io[x]);
 			io[x] = 0;
 			continue;
 		} else {
-			printk("<1>UIO48 - Base I/O Address = %04X\n", io[x]);
+			printk(KERN_INFO "UIO48: Base I/O Address = %04X\n", io[x]);
 			init_io(uiodev, io[x]);
 			io_num++;
 		}
@@ -403,10 +388,10 @@ int init_module()
 		// check and map any interrupts
 		if (irq[x]) {
 			if (request_irq(irq[x], irq_handler, IRQF_SHARED, DRVR_NAME, uiodev)) {
-				printk("<1>UIO48 - Unable to register IRQ %d\n", irq[x]);
+				printk(KERN_ERR "UIO48: Unable to register IRQ %d\n", irq[x]);
 			} else {
 				uiodev->irq = irq[x];
-				printk("<1>UIO48 - IRQ %d registered to Chip %d\n", irq[x], x + 1);
+				printk(KERN_INFO "UIO48: IRQ %d registered to Chip %d\n", irq[x], x + 1);
 			}
 		}
 	}
@@ -414,7 +399,7 @@ int init_module()
 	if (io_num)
 		return SUCCESS;
 
-	printk("<1>UIO48 - No resources available, driver terminating\n");
+	printk(KERN_WARNING "UIO48: No resources available, driver terminating\n");
 
 exit_cdev_delete:
 	unregister_chrdev_region(devno, 1);
