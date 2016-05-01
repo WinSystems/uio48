@@ -1,37 +1,14 @@
-///****************************************************************************
-//	
-//	Copyright 2011 by WinSystems Inc.
-//
-//	Permission is hereby granted to the purchaser of WinSystems GPIO cards 
-//	and CPU products incorporating a GPIO device, to distribute any binary 
-//	file or files compiled using this source code directly or in any work 
-//	derived by the user from this file. In no case may the source code, 
-//	original or derived from this file, be distributed to any third party 
-//	except by explicit permission of WinSystems. This file is distributed 
-//	on an "As-is" basis and no warranty as to performance or fitness of pur-
-//	poses is expressed or implied. In no case shall WinSystems be liable for 
-//	any direct or indirect loss or damage, real or consequential resulting 
-//	from the usage of this source code. It is the user's sole responsibility 
-//	to determine fitness for any considered purpose.
-//
-///****************************************************************************
-//
-//	Name	 : uio48.h
-//
-//	Project	 : UIO48 Linux Device Driver
-//
-//	Author	 : Paul DeMetrotion
-//
-///****************************************************************************
-//
-//	  Date		Revision	                Description
-//	--------	--------	---------------------------------------------
-//	07/21/10	  3.0		Original Release	
-//	06/14/11	  4.0		Changes:
-//								Added IOCTL_NUM
-//								Support for up to 4 devices
-//
-///****************************************************************************
+/*
+ * uio48.h: UIO48 Digital I/O Driver
+ *
+ * (C) Copyright 2011, 2016 by WinSystems, Inc.
+ * Author: Paul DeMetrotion <pdemetrotion@winsystems.com>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; version 2
+ * of the License.
+ */
 
 #ifndef __UIO48_H
 #define __UIO48_H
