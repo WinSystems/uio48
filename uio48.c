@@ -50,6 +50,7 @@ struct uio48_dev {
 	struct cdev uio48_cdev;
 	unsigned base_port;
 	unsigned char port_images[6];
+	int ready;
 };
 
 // Function prototypes for local functions
@@ -104,7 +105,8 @@ static irqreturn_t irq_handler(int __irq, void *dev_id)
 		if (uiodev->inptr == MAX_INTS)
 			uiodev->inptr = 0;
 
-		wake_up_interruptible(&uiodev->wq);
+		uiodev->ready = 1;
+		wake_up(&uiodev->wq);
 	}
 
 	return IRQ_HANDLED;
@@ -230,7 +232,8 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned lon
 		pr_devel("current process %i (%s) going to sleep\n",
 			current->pid, current->comm);
 
-		wait_event_interruptible(uiodev->wq, 1);
+		uiodev->ready = 0;
+		wait_event(uiodev->wq, uiodev->ready);
 
 		pr_devel("awoken %i (%s)\n", current->pid, current->comm);
 
