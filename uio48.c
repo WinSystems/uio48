@@ -13,20 +13,15 @@
 /* Helper to format our pr_* functions */
 #define pr_fmt(__fmt) KBUILD_MODNAME ": " __fmt
 
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/device.h>
-#include <linux/version.h>
 #include <linux/sched.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/errno.h>
-#include <linux/delay.h>
 #include <linux/mm.h>
-#include <linux/ioport.h>
 #include <linux/interrupt.h>
 #include <linux/cdev.h>
-#include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/io.h>
+#include <linux/fs.h>
 
 #include "uio48.h"
 
