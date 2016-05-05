@@ -31,7 +31,7 @@
 #include "uio48.h"
 
 #define MOD_DESC "WinSystems, Inc. UIO48 Digital I/O Driver"
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION(MOD_DESC);
 MODULE_AUTHOR("Paul DeMetrotion");
 
