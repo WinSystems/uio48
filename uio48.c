@@ -327,7 +327,7 @@ int init_module()
 
 		io_num++;
 
-		sprintf(uiodev->name, KBUILD_MODNAME ":%d:%x", irq[x], io[x]);
+		sprintf(uiodev->name, KBUILD_MODNAME "%c", 'a' + x);
 
 		pr_info("[%s] Added new device\n", uiodev->name);
 
