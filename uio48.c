@@ -267,6 +267,10 @@ int init_module()
 	pr_info(MOD_DESC " loading\n");
 
 	uio48_class = class_create(THIS_MODULE, KBUILD_MODNAME);
+	if (IS_ERR(uio48_class)) {
+		pr_err("Could not create module class\n");
+		return PTR_ERR(uio48_class);
+	}
 
 	/* Register the character device. */
 	if (uio48_init_major) {
