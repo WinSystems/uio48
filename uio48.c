@@ -72,7 +72,6 @@ static void unlock_port(struct uio48_dev *uiodev, int port_number);
 
 // Driver major number
 static int uio48_init_major;	// 0 = allocate dynamically
-static int uio48_major;
 
 // Page defintions
 #define PAGE0		0x0
@@ -274,20 +273,19 @@ int init_module()
 
 	/* Register the character device. */
 	if (uio48_init_major) {
-		uio48_major = uio48_init_major;
-		uio48_devno = MKDEV(uio48_major, 0);
+		uio48_devno = MKDEV(uio48_init_major, 0);
 		ret_val = register_chrdev_region(uio48_devno, MAX_CHIPS, KBUILD_MODNAME);
 	} else {
 		ret_val = alloc_chrdev_region(&uio48_devno, 0, MAX_CHIPS, KBUILD_MODNAME);
-		uio48_major = MAJOR(uio48_devno);
+		uio48_init_major = MAJOR(uio48_devno);
 	}
 
 	if (ret_val < 0) {
-		pr_err("Cannot obtain major number %d\n", uio48_major);
+		pr_err("Cannot obtain major number (%d)\n", uio48_init_major);
 		return ret_val;
 	}
 
-	pr_info("Major number %d assigned\n", uio48_major);
+	pr_info("Major number %d assigned\n", uio48_init_major);
 
 	for (x = io_num = 0; x < MAX_CHIPS; x++) {
 		struct uio48_dev *uiodev = &uiodevs[x];
@@ -314,7 +312,8 @@ int init_module()
 		/* Check and map our I/O region requests. */
 		if (request_region(io[x], 0x10, KBUILD_MODNAME) == NULL) {
 			pr_err("Unable to use I/O Address %04X\n", io[x]);
-			return -ENODEV;
+			cdev_del(&uiodev->cdev);
+			continue;
 		}
 
 		init_io(uiodev, io[x]);
@@ -323,7 +322,9 @@ int init_module()
 		if (irq[x]) {
 			if (request_irq(irq[x], irq_handler, IRQF_SHARED, KBUILD_MODNAME, uiodev)) {
 				pr_err("Unable to register IRQ %d\n", irq[x]);
-				return -ENODEV;
+				release_region(io[x], 0x10);
+				cdev_del(&uiodev->cdev);
+				continue;
 			}
 
 			uiodev->irq = irq[x];
@@ -343,6 +344,9 @@ int init_module()
 
 	pr_warning("No resources available, driver terminating\n");
 
+	class_destroy(uio48_class);
+	unregister_chrdev_region(uio48_devno, MAX_CHIPS);
+
 	return -ENODEV;
 }
 
@@ -354,7 +358,7 @@ void cleanup_module()
 {
 	int x;
 
-	// unregister I/O port usage
+	/* Unregister I/O port usage and IRQ */
 	for (x = 0; x < MAX_CHIPS; x++) {
 		struct uio48_dev *uiodev = &uiodevs[x];
 
@@ -364,6 +368,10 @@ void cleanup_module()
 		if (uiodev->irq)
 			free_irq(uiodev->irq, uiodev);
 	}
+
+	device_destroy(uio48_class, uio48_devno);
+	class_destroy(uio48_class);
+	unregister_chrdev_region(uio48_devno, MAX_CHIPS);
 }
 
 // ******************* Device Subroutines *****************************
