@@ -5,5 +5,3 @@ device="uio48"
 # invoke rmmod with all arguments we got
 /sbin/modprobe -r $module
 
-# Remove stale nodes
-rm -f /dev/${device}a
