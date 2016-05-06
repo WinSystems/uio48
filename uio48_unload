@@ -1,6 +1,5 @@
 #!/bin/sh
 module="uio48"
-device="uio48"
 
 # invoke rmmod with all arguments we got
 /sbin/modprobe -r $module
