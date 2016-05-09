@@ -35,7 +35,6 @@ MODULE_AUTHOR("Paul DeMetrotion");
 #define MAX_INTS 1024
 
 struct uio48_dev {
-	int id;
 	char name[32];
 	unsigned irq;
 	unsigned char int_buffer[MAX_INTS];
