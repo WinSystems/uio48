@@ -13,12 +13,5 @@ fi
 # invoke modprobe with all arguments
 /sbin/modprobe $module io=0x120 irq=10
 
-major=`cat /proc/devices | awk "\\$2==\"$module\" {print \\$1}"`
-
-# Create desired entry points
-# Add nodes as required in modprobe above
-rm -f /dev/${device}a
-mknod /dev/${device}a c $major 0
-
 chgrp $group /dev/${device}a
 chmod $mode  /dev/${device}a
