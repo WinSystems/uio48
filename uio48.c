@@ -381,7 +381,7 @@ static void init_io(struct uio48_dev *uiodev, unsigned base_port)
 	uiodev->base_port = base_port;
 
 	// Clear all of the I/O ports. This also makes them inputs
-	for (x = 0; x < 7; x++)
+	for (x = 0; x < 6; x++)
 		outb(0, base_port + x);
 
 	// Clear the image values as well
