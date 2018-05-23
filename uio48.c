@@ -47,6 +47,8 @@ struct uio48_dev {
 	unsigned base_port;
 	unsigned char port_images[6];
 	int ready;
+	unsigned char lock_image;
+	unsigned char irq_image[3];
 };
 
 // Function prototypes for local functions
@@ -90,24 +92,42 @@ static dev_t uio48_devno;
 /* UIO48 ISR */
 static irqreturn_t irq_handler(int __irq, void *dev_id)
 {
-	struct uio48_dev *uiodev = dev_id;
-	int c;
+    struct uio48_dev *uiodev = dev_id;
+    int i, j;
+    bool irq = false;
+	
+    if(get_int(uiodev))
+    {
+		for (i = 0; i < 3; i++) 
+		{
+			if (uiodev->irq_image[i] != 0)
+			{
+				irq = true;  // at least one irq
 
-	while ((c = get_int(uiodev))) {
-		clr_int(uiodev, c);
+				for (j = 0; j < 8; j++)
+				{
+					if ((uiodev->irq_image[i] >> j) & 1)
+					{
+						uiodev->int_buffer[uiodev->inptr++] = (i * 8) + j;
 
-		pr_devel("[%s] interrupt on bit %d\n", uiodev->name, c);
+						if (uiodev->inptr == MAX_INTS)
+							uiodev->inptr = 0;
+					}
+				}
+			}
+			else
+				continue;
+		}
 
-		uiodev->int_buffer[uiodev->inptr++] = c;
+		if (irq == true)
+		{
+			uiodev->ready = 1;
+			wake_up(&uiodev->wq);
+		}
+    }
+    
+    return IRQ_HANDLED;
 
-		if (uiodev->inptr == MAX_INTS)
-			uiodev->inptr = 0;
-
-		uiodev->ready = 1;
-		wake_up(&uiodev->wq);
-	}
-
-	return IRQ_HANDLED;
 }
 
 ///**********************************************************************
@@ -388,16 +408,19 @@ static void init_io(struct uio48_dev *uiodev, unsigned base_port)
 	for (x = 0; x < 6; x++)
 		uiodev->port_images[x] = 0;
 
+	// set lock image to default value in device
+	uiodev->lock_image = inb(base_port + 7) & 0x3F; // clear page bits
+	
 	// Set page 2 access, for interrupt enables
-	outb(PAGE2 | inb(base_port + 7), base_port + 7);
+	outb(PAGE2 | uiodev->lock_image, base_port + 7);
 
 	// Clear all interrupt enables
 	outb(0, base_port + 8);
 	outb(0, base_port + 9);
 	outb(0, base_port + 0x0a);
 
-	// Restore page 0 register access
-	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
+	// default to page 3 register access for fast isr
+	outb(PAGE3 | uiodev->lock_image, base_port + 7);
 
 	//release lock
 	mutex_unlock(&uiodev->mtx);
@@ -493,7 +516,7 @@ static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | inb(base_port + 7), base_port + 7);
+	outb(PAGE2 | uiodev->lock_image, base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -505,7 +528,7 @@ static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
 	outb(temp,port);
 
 	// Turn on access to page 1 for polarity control
-	outb(PAGE1 | (~PAGE3 & inb(base_port + 7)), base_port + 7);
+	outb(PAGE1 | uiodev->lock_image, base_port + 7);
 
 	// Get the current state of the polarity register
 	temp = inb(port);
@@ -519,8 +542,8 @@ static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
 	// Write out the new polarity value
 	outb(temp, port);
 
-	// Set access back to page 0
-	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
+	// Set access back to page 3
+	outb(PAGE3 | uiodev->lock_image, base_port + 7);
 
 	//release lock
 	mutex_unlock(&uiodev->mtx);
@@ -546,7 +569,7 @@ static void disab_int(struct uio48_dev *uiodev, int bit_number)
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | inb(base_port + 7), base_port + 7);
+	outb(PAGE2 | uiodev->lock_image, base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -557,8 +580,8 @@ static void disab_int(struct uio48_dev *uiodev, int bit_number)
 	// Now update the interrupt enable register
 	outb(temp, port);
 
-	// Set access back to page 0
-	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
+	// Set access back to page 3
+	outb(PAGE3 | uiodev->lock_image, base_port + 7);
 
 	//release lock
 	mutex_unlock(&uiodev->mtx);
@@ -584,7 +607,7 @@ static void clr_int(struct uio48_dev *uiodev, int bit_number)
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | inb(base_port + 7), base_port + 7);
+	outb(PAGE2 | uiodev->lock_image, base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -600,8 +623,8 @@ static void clr_int(struct uio48_dev *uiodev, int bit_number)
 
 	outb(temp, port);
 
-	// Set access back to page 0
-	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
+	// Set access back to page 3
+	outb(PAGE3 | uiodev->lock_image, base_port + 7);
 
 	//release lock
 	spin_unlock(&uiodev->spnlck);
@@ -610,7 +633,7 @@ static void clr_int(struct uio48_dev *uiodev, int bit_number)
 static int get_int(struct uio48_dev *uiodev)
 {
 	unsigned base_port = uiodev->base_port;
-	int i, t, ret = 0;
+	int i, t;//, ret = 0;
 
 	spin_lock(&uiodev->spnlck);
 
@@ -624,50 +647,32 @@ static int get_int(struct uio48_dev *uiodev)
 		return 0;
 	}
 
-	/* Set access to page 3 for interrupt id register. */
-	outb(PAGE3 | inb(base_port + 7), base_port + 7);
-
 	/* Check ports 0, 1, and 2 for interrupt ID register. */
 	for (i = 0; i < 3; i++) {
-		int j;
+		/* Read the interrupt ID register if necessary */
+		if ((t >> i) & 1) {
+   			uiodev->irq_image[i] = inb(base_port + 8 + i);
 
-		/* Read the interrupt ID register for port. */
-		t = inb(base_port + 8 + i);
-
-		/* See if any bit set, if so return the bit number. */
-		if (t == 0)
-			continue;
-
-		for (j = 0; j <= 7; j++) {
-			if (!(t & (1 << j)))
-				continue;
-
-			ret = (j + 1 + (8 * i));
-			goto isr_out;
+			// clear irq
+   			outb(0, base_port + 8 + i);
 		}
+		else
+			uiodev->irq_image[i] = 0;
+
 	}
-
-	/* We should never get here unless the hardware is seriously
-	 * misbehaving. */
-	WARN_ONCE(1, KBUILD_MODNAME ": Encountered superflous interrupt");
-
-isr_out:
-	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
 	spin_unlock(&uiodev->spnlck);
 
-	return ret;
+	return 1;
 }
 
 static int get_buffered_int(struct uio48_dev *uiodev)
 {
 	int temp;
 
+	// for poled option, no irq selected
 	if (uiodev->irq == 0) {
 		temp = get_int(uiodev);
-
-		if (temp)
-			clr_int(uiodev, temp);
 
 		return temp;
 	}
@@ -691,14 +696,8 @@ static void clr_int_id(struct uio48_dev *uiodev, int port_number)
 	// obtain lock before writing
 	mutex_lock_interruptible(&uiodev->mtx);
 
-	// Set access to page 3 for interrupt id register
-	outb(PAGE3 | inb(base_port + 7), base_port + 7);
-
 	// write to specified int_id register
 	outb(0, base_port + 8 + port_number);
-
-	// Reset access to page 0
-	outb(~PAGE3 & inb(base_port + 7), base_port + 7);
 
 	//release lock
 	mutex_unlock(&uiodev->mtx);
@@ -712,7 +711,8 @@ static void lock_port(struct uio48_dev *uiodev, int port_number)
 	mutex_lock_interruptible(&uiodev->mtx);
 
 	// write to specified int_id register
-	outb(1 << port_number | inb(base_port + 7), base_port + 7);
+	uiodev->lock_image |= 1 << port_number;
+	outb(PAGE3 | uiodev->lock_image, base_port + 7);
 
 	//release lock
 	mutex_unlock(&uiodev->mtx);
@@ -726,7 +726,8 @@ static void unlock_port(struct uio48_dev *uiodev, int port_number)
 	mutex_lock_interruptible(&uiodev->mtx);
 
 	// write to specified int_id register
-	outb(~(1 << port_number) & inb(base_port + 7), base_port + 7);
+	uiodev->lock_image &= ~(1 << port_number);
+	outb((PAGE3 | uiodev->lock_image), base_port + 7);
 
 	//release lock
 	mutex_unlock(&uiodev->mtx);

@@ -44,6 +44,8 @@
 //		USER LIBRARY FUNCTIONS
 //**************************************************************************
 
+int check_handle(int chip_number);
+
 // device handles
 int handle[MAX_CHIPS] = {0,0,0,0};
 
