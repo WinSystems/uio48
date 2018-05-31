@@ -95,35 +95,35 @@ static irqreturn_t irq_handler(int __irq, void *dev_id)
     struct uio48_dev *uiodev = dev_id;
     int i, j;
     bool irq = false;
-	
+
     if(get_int(uiodev))
     {
-		for (i = 0; i < 3; i++) 
-		{
-			if (uiodev->irq_image[i] != 0)
-			{
-				irq = true;  // at least one irq
+        for (i = 0; i < 3; i++) 
+        {	
+            if (uiodev->irq_image[i] != 0)
+            {
+                irq = true;  // at least one irq
 
-				for (j = 0; j < 8; j++)
-				{
-					if ((uiodev->irq_image[i] >> j) & 1)
-					{
-						uiodev->int_buffer[uiodev->inptr++] = (i * 8) + j;
+                for (j = 0; j < 8; j++)
+                {
+                    if ((uiodev->irq_image[i] >> j) & 1)
+                    {
+                        uiodev->int_buffer[uiodev->inptr++] = (i * 8) + j + 1;
 
-						if (uiodev->inptr == MAX_INTS)
-							uiodev->inptr = 0;
-					}
-				}
-			}
-			else
-				continue;
-		}
+                        if (uiodev->inptr == MAX_INTS)
+                            uiodev->inptr = 0;
+                    }
+                }
+            }
+            else
+                continue;
+        }
 
-		if (irq == true)
-		{
-			uiodev->ready = 1;
-			wake_up(&uiodev->wq);
-		}
+        if (!uiodev->ready)
+        {
+            uiodev->ready = 1;
+            wake_up(&uiodev->wq);
+        }
     }
     
     return IRQ_HANDLED;
@@ -223,7 +223,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num,
 
 	case IOCTL_WAIT_INT:
 		if ((i = get_buffered_int(uiodev)))
-			return i;
+            return i;
 
 		uiodev->ready = 0;
 		wait_event(uiodev->wq, uiodev->ready);
@@ -670,7 +670,7 @@ static int get_buffered_int(struct uio48_dev *uiodev)
 {
 	int temp;
 
-	// for poled option, no irq selected
+	// for polled option, no irq selected
 	if (uiodev->irq == 0) {
 		temp = get_int(uiodev);
 
