@@ -40,7 +40,11 @@
 
 #include "uio48.h"
 
-main(int argc, char *argv[])
+int read_bit(int chip_number, int bit_number);
+int set_bit(int chip_number, int bit_number);
+int clr_bit(int chip_number, int bit_number);
+
+int main(int argc, char *argv[])
 {
 	int x;
 
