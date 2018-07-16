@@ -47,7 +47,7 @@ int read_bit(int chip_number, int bit_number);
 int enab_int(int chip_number, int bit_number, int polarity);
 int clr_int(int chip_number, int bit_number);
 int get_int(int chip_number);
-int wait_int(int chip_number);
+int wait_int(int chip_number, unsigned int timeout);
 
 // These two functions will be sub-processes using the Posix threads 
 // capability of Linux. These two threads will simulate a type of 
@@ -66,6 +66,10 @@ int main(int argc, char *argv[])
 	pthread_t a_thread;
 	int c;
 	int x;
+
+
+
+
 
 	// Do a read_bit to test for port availability
 	c = read_bit(1,1);
@@ -169,7 +173,7 @@ void thread_function(void *arg)
 	    // This call will put THIS process to sleep until either an
 	    // interrupt occurs or a terminating signal is sent by the 
 	    // parent or the system.
-	    c = wait_int(1);
+	    c = wait_int(1, 1);
 
 	    // We check to see if it was a real interrupt instead of a
 	    // termination request.

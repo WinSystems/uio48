@@ -63,4 +63,9 @@
 /* UNLOCK_PORT function */
 #define	IOCTL_UNLOCK_PORT _IOWR(IOCTL_NUM, 14, int)
 
+enum irq_edge {
+  FALLING = 0,
+  RISING
+};
+
 #endif /* __UIO48_H */

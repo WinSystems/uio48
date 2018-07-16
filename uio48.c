@@ -4,7 +4,7 @@
  * (C) Copyright 2011, 2016 by WinSystems, Inc.
  * Author: Paul DeMetrotion <pdemetrotion@winsystems.com>
  *
- * This program is free software; you can redistribute it and/or
+ * This program is free software; you can redistribute it and/orxc v 
  * modify it under the terms of the GNU General Public License
  * as published by the Free Software Foundation; version 2
  * of the License.
@@ -226,7 +226,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num,
             return i;
 
 		uiodev->ready = 0;
-		wait_event(uiodev->wq, uiodev->ready);
+		wait_event_timeout(uiodev->wq, uiodev->ready, ((int)(ioctl_param & 0xffff) * HZ));
 
 		/* Getting here does not guarantee that there's an interrupt
 		 * available we may have been awakened by some other signal.
