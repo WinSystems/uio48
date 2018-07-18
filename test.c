@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
         for(int i = 0; i <= 5; i++)
         unlock_port(1,i);
    }
-   return 1; 
+   return 0; 
 }//end of main
 //
 //------------------------------------------------------------------------
@@ -136,7 +136,7 @@ int RSC_check()
             return(-1);
     }//bits 17-24
 
-    return 1;
+    return 0;
 }//end of RSC_check
 //
 //------------------------------------------------------------------------
@@ -193,7 +193,7 @@ int write_check(){
         if(read_bit(1, i) != 0)
             return(-1);
     }//bits 17-24
-    return 1;
+    return 0;
 }//end of write_check
 //
 //------------------------------------------------------------------------
@@ -283,7 +283,7 @@ int intTest()
         if(get_int(1) != (i+4))
             return -1;
     }//bits 17-24
-    return 1;
+    return 0;
 }//end of IntTest
 //
 //------------------------------------------------------------------------
@@ -318,7 +318,7 @@ int Byte_test()
                  return -1;
         }
     }
-    return 1;
+    return 0;
 }//end of Byte_test
 //
 //------------------------------------------------------------------------
@@ -364,5 +364,5 @@ int lock_test()
                 return -1;
         }
     }
-    return 1;
+    return 0;
 }//end of lock_test
