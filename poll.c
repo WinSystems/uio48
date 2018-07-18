@@ -63,6 +63,8 @@ char line[80];
 
 int main(int argc, char *argv[])
 {
+    printf("Fail\n");
+
 	int res, res1;
 	pthread_t a_thread;
 	int c;
