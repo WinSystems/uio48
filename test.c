@@ -53,25 +53,25 @@ int lock_test();
 
 int main(int argc, char *argv[])
 {
-   if(RSC_check() == 1)
+   if(RSC_check() == 0)
         fprintf(stderr, "PASS\n");
    else
         fprintf(stderr, "FAIl\n\n");
 
-   if(write_check() == 1)
+   if(write_check() == 0)
         fprintf(stderr, "PASS\n");
    else
         fprintf(stderr, "FAIl\n\n");
 
-   if(intTest() ==1)
+   if(intTest() == 0)
         fprintf(stderr, "PASS\n");
    else
         fprintf(stderr, "FAIL\n");
-   if(Byte_test() ==1)
+   if(Byte_test() == 0)
         fprintf(stderr, "PASS\n");
    else
         fprintf(stderr, "FAIL\n");
-   if(lock_test() ==1)
+   if(lock_test() == 0)
         fprintf(stderr, "PASS\n");
    else
    {
