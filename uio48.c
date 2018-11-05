@@ -375,15 +375,21 @@ void cleanup_module()
 	/* Unregister I/O port usage and IRQ */
 	for (x = 0; x < MAX_CHIPS; x++) {
 		struct uio48_dev *uiodev = &uiodevs[x];
-
+		if(io[x] == 0)
+			continue;
+		
 		if (uiodev->base_port)
 			release_region(uiodev->base_port, 0x10);
 
 		if (uiodev->irq)
 			free_irq(uiodev->irq, uiodev);
+		
+		cdev_del(&uiodevs[x].cdev);
+		
+		device_destroy(uio48_class, uio48_devno+x);
+
 	}
 
-	device_destroy(uio48_class, uio48_devno);
 	class_destroy(uio48_class);
 	unregister_chrdev_region(uio48_devno, MAX_CHIPS);
 }
