@@ -52,67 +52,115 @@ MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION(MOD_DESC);
 MODULE_AUTHOR("Paul DeMetrotion");
 
-// ******************* Device Declarations *****************************
+//******************************************************************************
+//
+// Local preprocessor macros
+//
 
-#define MAX_INTS 1024
+#define MAX_INTS                    1024
+#define NUMBER_OF_DIO_PORTS         6
+
+//
+// Page defintions
+//
+#define PAGE0           0x0
+#define PAGE1           0x40
+#define PAGE2           0x80
+#define PAGE3           0xc0
+
+
+//
+// macro to turn a struct device's driver_data field into a void * suitable for
+// casting to a pcmmio structure pointer...
+//
+#define to_uio48_dev( p )    dev_get_drvdata( p )
+
+
+//******************************************************************************
+//
+// Local structures, typedefs and enums...
+//
+
+//
+// This is it - the software representation of the uio48 device. It'll be
+// instantiated as part of a system "struct device", and will have it's own
+// unique system "struct class".
+//
 
 struct uio48_dev {
-	char name[32];
-	unsigned irq;
-	unsigned char int_buffer[MAX_INTS];
-	int inptr;
-	int outptr;
-	wait_queue_head_t wq;
-	struct mutex mtx;
-	spinlock_t spnlck;
-	struct cdev cdev;
-	unsigned base_port;
-	unsigned char port_images[6];
-	int ready;
-	unsigned char lock_image;
-	unsigned char irq_image[3];
+	char                   name[32];
+	unsigned               irq;
+	unsigned char          int_buffer[MAX_INTS];
+	int                    inptr;
+	int                    outptr;
+	wait_queue_head_t      wq;
+	struct mutex           mtx;
+	spinlock_t             spnlck;
+	struct cdev            cdev;
+	unsigned               base_port;
+	unsigned char          port_images[ NUMBER_OF_DIO_PORTS ];
+	int                    ready;
+	unsigned char          lock_image;
+	unsigned char          irq_image[ 3 ];
+        
+        struct device         *pDev;       // added so we can self-reference from the
+                                           // power management functions
+        
+        
 };
 
-// Function prototypes for local functions
-static void init_io(struct uio48_dev *uiodev, unsigned base_port);
-static int read_bit(struct uio48_dev *uiodev, int bit_number);
-static void write_bit(struct uio48_dev *uiodev, int bit_number, int val);
-static void UIO48_set_bit(struct uio48_dev *uiodev, int bit_num);
-static void clr_bit(struct uio48_dev *uiodev, int bit_num);
-static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity);
-static void disab_int(struct uio48_dev *uiodev, int bit_number);
-static void clr_int(struct uio48_dev *uiodev, int bit_number);
-static int get_int(struct uio48_dev *uiodev);
-static int get_buffered_int(struct uio48_dev *uiodev);
-static void clr_int_id(struct uio48_dev *uiodev, int port_number);
-static void lock_port(struct uio48_dev *uiodev, int port_number);
-static void unlock_port(struct uio48_dev *uiodev, int port_number);
 
+typedef struct uio48_dev    *p_uio48_dev;        
+
+//******************************************************************************
+//
+// local (static) variables
+//
+
+//
 // Driver major number
-static int uio48_init_major;	// 0 = allocate dynamically
+//
+static int uio48_init_major;           // 0 = allocate dynamically
 
-// Page defintions
-#define PAGE0		0x0
-#define PAGE1		0x40
-#define PAGE2		0x80
-#define PAGE3		0xc0
-
+//
 // Our modprobe command line arguments
-static unsigned io[MAX_CHIPS];
-static unsigned irq[MAX_CHIPS];
+//
+static unsigned     io_port[ MAX_CHIPS ];
+static unsigned     irq[ MAX_CHIPS ];
 
-MODULE_PARM_DESC(io, "Array of IO addresses for devices");
-module_param_array(io, uint, NULL, S_IRUGO);
-MODULE_PARM_DESC(irq, "Array of IRQ routes for devices");
-module_param_array(irq, uint, NULL, S_IRUGO);
+MODULE_PARM_DESC( io_port, "Array of IO addresses for devices" );
+module_param_array( io_port, uint, NULL, S_IRUGO );
 
-static struct uio48_dev uiodevs[MAX_CHIPS];
+MODULE_PARM_DESC( irq, "Array of IRQ routes for devices" );
+module_param_array( irq, uint, NULL, S_IRUGO );
 
-static struct class *uio48_class;
-static dev_t uio48_devno;
+static struct uio48_dev     uiodevs[MAX_CHIPS];
+static struct class        *p_uio48_class;
+static dev_t                uio48_devno;
 
-/* UIO48 ISR */
-static irqreturn_t irq_handler(int __irq, void *dev_id)
+static unsigned char        BoardCount = 0;
+
+
+
+//******************************************************************************
+// global (exported) variables                        
+
+
+
+//******************************************************************************
+//
+// prototypes for local (static) functions
+//                        
+
+static void clr_int( p_uio48_dev pUioDev, int bit_number);
+static int get_int( p_uio48_dev pUioDev );
+
+
+//******************************************************************************
+//
+// UIO48 ISR
+//
+static irqreturn_t irq_handler( int __irq, void *dev_id )
 {
     struct uio48_dev *uiodev = dev_id;
     int i, j;
