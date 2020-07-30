@@ -2,6 +2,9 @@
 module="uio48"
 device="uio48"
 mode="666"
+io_addr="0x120"
+irq_num="10"
+
 
 # Group: since distributions do it differently, look for wheel or use staff
 if grep '^staff:' /etc/group > /dev/null; then
@@ -11,7 +14,8 @@ else
 fi
 
 # invoke modprobe with all arguments
-/sbin/modprobe $module io=0x120 irq=10
+/sbin/modprobe $module io_port=$io_addr irq=$irq_num
+
 
 chgrp $group /dev/${device}a
 chmod $mode  /dev/${device}a
