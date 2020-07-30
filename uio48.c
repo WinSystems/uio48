@@ -200,309 +200,51 @@ static irqreturn_t irq_handler( int __irq, void *dev_id )
 
 }
 
-///**********************************************************************
-//			DEVICE OPEN
-///**********************************************************************
-static int device_open(struct inode *inode, struct file *file)
-{
-	struct uio48_dev *uiodev;
-
-	uiodev = container_of(inode->i_cdev, struct uio48_dev, cdev);
-
-	file->private_data = uiodev;
-
-	pr_devel("[%s] device_open\n", uiodev->name);
-
-	return 0;
-}
-
-///**********************************************************************
-//			DEVICE CLOSE
-///**********************************************************************
-static int device_release(struct inode *inode, struct file *file)
-{
-	struct uio48_dev *uiodev;
-
-	uiodev = container_of(inode->i_cdev, struct uio48_dev, cdev);
-
-	pr_devel("[%s] device_release\n", uiodev->name);
-
-	return 0;
-}
-
-///**********************************************************************
-//			DEVICE IOCTL
-///**********************************************************************
-static long device_ioctl(struct file *file, unsigned int ioctl_num,
-			 unsigned long ioctl_param)
-{
-	struct uio48_dev *uiodev = file->private_data;
-	int i, port, ret_val;
-
-	pr_devel("[%s] IOCTL CODE %04X\n", uiodev->name, ioctl_num);
-
-	switch (ioctl_num) {
-	case IOCTL_READ_PORT:
-		port = (ioctl_param & 0xff);
-		ret_val = inb(uiodev->base_port + port);
-		return ret_val;
-
-	case IOCTL_WRITE_PORT:
-		mutex_lock_interruptible(&uiodev->mtx);
-
-		port = (ioctl_param >> 8) & 0xff;
-		ret_val = ioctl_param & 0xff;
-
-		outb(ret_val, uiodev->base_port + port);
-
-		mutex_unlock(&uiodev->mtx);
-
-		return SUCCESS;
-
-	case IOCTL_READ_BIT:
-		ret_val = read_bit(uiodev, ioctl_param & 0xff);
-		return ret_val;
-
-	case IOCTL_WRITE_BIT:
-		write_bit(uiodev, (ioctl_param >> 8) & 0xff, ioctl_param & 0xff);
-		return SUCCESS;
-
-	case IOCTL_SET_BIT:
-		UIO48_set_bit(uiodev, ioctl_param & 0xff);
-		return SUCCESS;
-
-	case IOCTL_CLR_BIT:
-		clr_bit(uiodev, ioctl_param & 0xff);
-		return SUCCESS;
-
-	case IOCTL_ENAB_INT:
-		enab_int(uiodev, (int)(ioctl_param >> 8), (int)(ioctl_param & 0xff));
-		return SUCCESS;
-
-	case IOCTL_DISAB_INT:
-		disab_int(uiodev, ioctl_param & 0xff);
-		return SUCCESS;
-
-	case IOCTL_CLR_INT:
-		clr_int(uiodev, ioctl_param & 0xff);
-		return SUCCESS;
-
-	case IOCTL_GET_INT:
-		i = get_buffered_int(uiodev);
-		return i;
-
-	case IOCTL_WAIT_INT:
-		if ((i = get_buffered_int(uiodev)))
-            return i;
-
-		uiodev->ready = 0;
-		wait_event(uiodev->wq, uiodev->ready);
-
-		/* Getting here does not guarantee that there's an interrupt
-		 * available we may have been awakened by some other signal.
-		 * In any case We'll return whatever's available in the
-		 * interrupt queue even if it's empty. */
-		i = get_buffered_int(uiodev);
-
-		return i;
-
-	case IOCTL_CLR_INT_ID:
-		clr_int_id(uiodev, (int)(ioctl_param & 0xff));
-		return SUCCESS;
-
-	case IOCTL_LOCK_PORT:
-		lock_port(uiodev, (int)(ioctl_param & 0xff));
-		return SUCCESS;
-
-	case IOCTL_UNLOCK_PORT:
-		unlock_port(uiodev, (int)(ioctl_param & 0xff));
-		return SUCCESS;
-
-	default:
-		return -EINVAL;
-	}
-
-	return SUCCESS;
-}
-
-///**********************************************************************
-//			Module Declarations
-// This structure will hold the functions to be called
-// when a process does something to the device
-///**********************************************************************
-static struct file_operations uio48_fops = {
-	owner:			THIS_MODULE,
-	unlocked_ioctl:		device_ioctl,
-	open:			device_open,
-	release:		device_release,
-};
-
-///**********************************************************************
-//			INIT MODULE
-///**********************************************************************
-// register the character device
-int init_module()
-{
-	int ret_val, io_num;
-	dev_t dev;
-	int x;
-
-	pr_info(MOD_DESC " loading\n");
-
-	uio48_class = class_create(THIS_MODULE, KBUILD_MODNAME);
-	if (IS_ERR(uio48_class)) {
-		pr_err("Could not create module class\n");
-		return PTR_ERR(uio48_class);
-	}
-
-	/* Register the character device. */
-	if (uio48_init_major) {
-		uio48_devno = MKDEV(uio48_init_major, 0);
-		ret_val = register_chrdev_region(uio48_devno, MAX_CHIPS, KBUILD_MODNAME);
-	} else {
-		ret_val = alloc_chrdev_region(&uio48_devno, 0, MAX_CHIPS, KBUILD_MODNAME);
-		uio48_init_major = MAJOR(uio48_devno);
-	}
-
-	if (ret_val < 0) {
-		pr_err("Cannot obtain major number (%d)\n", uio48_init_major);
-		return ret_val;
-	}
-
-	pr_info("Major number %d assigned\n", uio48_init_major);
-
-	for (x = io_num = 0; x < MAX_CHIPS; x++) {
-		struct uio48_dev *uiodev = &uiodevs[x];
-
-		/* If no IO port, skip this idx. */
-		if (io[x] == 0)
-			continue;
-
-		mutex_init(&uiodev->mtx);
-		spin_lock_init(&uiodev->spnlck);
-		init_waitqueue_head(&uiodev->wq);
-
-		dev = uio48_devno + x;
-
-		/* Initialize char device. */
-		cdev_init(&uiodev->cdev, &uio48_fops);
-		ret_val = cdev_add(&uiodev->cdev, dev, 1);
-
-		if (ret_val) {
-			pr_err("Error adding character device for node %d\n", x);
-			return ret_val;
-		}
-
-		/* Check and map our I/O region requests. */
-		if (request_region(io[x], 0x10, KBUILD_MODNAME) == NULL) {
-			pr_err("Unable to use I/O Address %04X\n", io[x]);
-			cdev_del(&uiodev->cdev);
-			continue;
-		}
-
-		init_io(uiodev, io[x]);
-
-		/* Check and map any interrupts. */
-		if (irq[x]) {
-			if (request_irq(irq[x], irq_handler, IRQF_SHARED, KBUILD_MODNAME, uiodev)) {
-				pr_err("Unable to register IRQ %d\n", irq[x]);
-				release_region(io[x], 0x10);
-				cdev_del(&uiodev->cdev);
-				continue;
-			}
-
-			uiodev->irq = irq[x];
-		}
-
-		io_num++;
-
-		sprintf(uiodev->name, KBUILD_MODNAME "%c", 'a' + x);
-
-		pr_info("[%s] Added new device\n", uiodev->name);
-
-		device_create(uio48_class, NULL, dev, NULL, "%s", uiodev->name);
-	}
-
-	if (io_num)
-		return 0;
-
-	pr_warning("No resources available, driver terminating\n");
-
-	class_destroy(uio48_class);
-	unregister_chrdev_region(uio48_devno, MAX_CHIPS);
-
-	return -ENODEV;
-}
-
-///**********************************************************************
-//			CLEANUP MODULE
-///**********************************************************************
-// unregister the appropriate file from /proc
-void cleanup_module()
-{
-	int x;
-
-	/* Unregister I/O port usage and IRQ */
-	for (x = 0; x < MAX_CHIPS; x++) {
-		struct uio48_dev *uiodev = &uiodevs[x];
-		if(io[x] == 0)
-			continue;
-		
-		if (uiodev->base_port)
-			release_region(uiodev->base_port, 0x10);
-
-		if (uiodev->irq)
-			free_irq(uiodev->irq, uiodev);
-		
-		cdev_del(&uiodevs[x].cdev);
-		
-		device_destroy(uio48_class, uio48_devno+x);
-
-	}
-
-	class_destroy(uio48_class);
-	unregister_chrdev_region(uio48_devno, MAX_CHIPS);
-}
-
 // ******************* Device Subroutines *****************************
 
-static void init_io(struct uio48_dev *uiodev, unsigned base_port)
+static void init_io( p_uio48_dev pUioDev, unsigned base_port )
 {
-	int x;
+   int x;
 
-	// obtain lock
-	mutex_lock_interruptible(&uiodev->mtx);
+   // obtain lock
+   mutex_lock_interruptible( &pUioDev->mtx );
 
-	// save the address for later use
-	uiodev->base_port = base_port;
+   // save the address for later use
+   pUioDev->base_port = base_port;
 
-	// Clear all of the I/O ports. This also makes them inputs
-	for (x = 0; x < 6; x++)
-		outb(0, base_port + x);
+   // Clear all of the I/O ports. This also makes them inputs
+   for ( x = 0; x < NUMBER_OF_DIO_PORTS; x++ )
+   {
+      outb(0, base_port + x);
+   }
 
-	// Clear the image values as well
-	for (x = 0; x < 6; x++)
-		uiodev->port_images[x] = 0;
+   // Clear the image values as well
+   for (x = 0; x < NUMBER_OF_DIO_PORTS; x++)
+   {
+      pUioDev->port_images[ x ] = 0;
+   }
 
-	// set lock image to default value in device
-	uiodev->lock_image = inb(base_port + 7) & 0x3F; // clear page bits
-	
-	// Set page 2 access, for interrupt enables
-	outb(PAGE2 | uiodev->lock_image, base_port + 7);
+   // set lock image to default value in device
+   pUioDev->lock_image = inb( base_port + 7 ) & 0x3F; // clear page bits
 
-	// Clear all interrupt enables
-	outb(0, base_port + 8);
-	outb(0, base_port + 9);
-	outb(0, base_port + 0x0a);
+   // Set page 2 access, for interrupt enables
+   outb( ( PAGE2 | pUioDev->lock_image ),( base_port + 7 ) );
 
-	// default to page 3 register access for fast isr
-	outb(PAGE3 | uiodev->lock_image, base_port + 7);
+   // Clear all interrupt enables
+   outb( 0, base_port + 8 );
+   outb( 0, base_port + 9 );
+   outb( 0, base_port + 0x0a );
 
-	//release lock
-	mutex_unlock(&uiodev->mtx);
+   // default to page 3 register access for fast isr
+   outb( ( PAGE3 | pUioDev->lock_image ), ( base_port + 7) );
+
+   //release lock
+   mutex_unlock( &pUioDev->mtx );
 }
 
-static int read_bit(struct uio48_dev *uiodev, int bit_number)
+//***********************************************************************
+
+static int read_bit( p_uio48_dev pUioDev, int bit_number)
 {
 	unsigned port;
 	int val;
