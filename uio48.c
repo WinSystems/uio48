@@ -253,7 +253,7 @@ static int read_bit( p_uio48_dev pUioDev, int bit_number)
 	--bit_number;
 
 	// Calculate the I/O port address based on the updated bit_number
-	port = (bit_number / 8) + uiodev->base_port;
+	port = (bit_number / 8) + pUioDev->base_port;
 
 	// Get the current contents of the port
 	val = inb(port);
@@ -267,7 +267,9 @@ static int read_bit( p_uio48_dev pUioDev, int bit_number)
 	return 0;
 }
 
-static void write_bit(struct uio48_dev *uiodev, int bit_number, int val)
+//***********************************************************************
+
+static void write_bit( p_uio48_dev pUioDev, int bit_number, int val)
 {
 	unsigned port;
 	unsigned temp;
@@ -277,13 +279,13 @@ static void write_bit(struct uio48_dev *uiodev, int bit_number, int val)
 	--bit_number;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&uiodev->mtx);
+	mutex_lock_interruptible(&pUioDev->mtx);
 
 	// Calculate the I/O address of the port based on the bit number
-	port = (bit_number / 8) + uiodev->base_port;
+	port = (bit_number / 8) + pUioDev->base_port;
 
 	// Use the image value to avoid having to read the port first
-	temp = uiodev->port_images[bit_number / 8];
+	temp = pUioDev->port_images[bit_number / 8];
 
 	// Calculate a bit mask for the specified bit
 	mask = (1 << (bit_number % 8));
@@ -295,37 +297,43 @@ static void write_bit(struct uio48_dev *uiodev, int bit_number, int val)
 		temp = temp & ~mask;
 
 	// Update the image value with the value we're about to write
-	uiodev->port_images[bit_number /8] = temp;
+	pUioDev->port_images[bit_number /8] = temp;
 
 	// Now actally update the port. Only the specified bit is affected
 	outb(temp, port);
 
 	//release lock
-	mutex_unlock(&uiodev->mtx);
+	mutex_unlock(&pUioDev->mtx);
 }
 
-static void UIO48_set_bit(struct uio48_dev *uiodev, int bit_num)
+//***********************************************************************
+
+static void UIO48_set_bit( p_uio48_dev pUioDev, int bit_num)
 {
-	write_bit(uiodev, bit_num, 1);
+	write_bit(pUioDev, bit_num, 1);
 }
 
-static void clr_bit(struct uio48_dev *uiodev, int bit_num)
+//***********************************************************************
+
+static void clr_bit( p_uio48_dev pUioDev, int bit_num)
 {
-	write_bit(uiodev, bit_num, 0);
+	write_bit(pUioDev, bit_num, 0);
 }
 
-static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
+//***********************************************************************
+
+static void enab_int( p_uio48_dev pUioDev, int bit_number, int polarity )
 {
 	unsigned port;
 	unsigned temp;
 	unsigned mask;
-	unsigned base_port = uiodev->base_port;
+	unsigned base_port = pUioDev->base_port;
 
 	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
-	mutex_lock_interruptible(&uiodev->mtx);
+	mutex_lock_interruptible(&pUioDev->mtx);
 
 	// Calculate the I/O address based upon bit number
 	port = (bit_number / 8) + base_port + 8;
@@ -334,7 +342,7 @@ static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | uiodev->lock_image, base_port + 7);
+	outb(PAGE2 | pUioDev->lock_image, base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -346,7 +354,7 @@ static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
 	outb(temp,port);
 
 	// Turn on access to page 1 for polarity control
-	outb(PAGE1 | uiodev->lock_image, base_port + 7);
+	outb(PAGE1 | pUioDev->lock_image, base_port + 7);
 
 	// Get the current state of the polarity register
 	temp = inb(port);
@@ -361,24 +369,26 @@ static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
 	outb(temp, port);
 
 	// Set access back to page 3
-	outb(PAGE3 | uiodev->lock_image, base_port + 7);
+	outb(PAGE3 | pUioDev->lock_image, base_port + 7);
 
 	//release lock
-	mutex_unlock(&uiodev->mtx);
+	mutex_unlock(&pUioDev->mtx);
 }
 
-static void disab_int(struct uio48_dev *uiodev, int bit_number)
+//***********************************************************************
+
+static void disab_int( p_uio48_dev pUioDev, int bit_number )
 {
 	unsigned port;
 	unsigned temp;
 	unsigned mask;
-	unsigned base_port = uiodev->base_port;
+	unsigned base_port = pUioDev->base_port;
 
 	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
-	mutex_lock_interruptible(&uiodev->mtx);
+	mutex_lock_interruptible(&pUioDev->mtx);
 
 	// Calculate the I/O address based upon bit number
 	port = (bit_number / 8) + base_port + 8;
@@ -387,7 +397,7 @@ static void disab_int(struct uio48_dev *uiodev, int bit_number)
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | uiodev->lock_image, base_port + 7);
+	outb(PAGE2 | pUioDev->lock_image, base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -399,24 +409,26 @@ static void disab_int(struct uio48_dev *uiodev, int bit_number)
 	outb(temp, port);
 
 	// Set access back to page 3
-	outb(PAGE3 | uiodev->lock_image, base_port + 7);
+	outb(PAGE3 | pUioDev->lock_image, base_port + 7);
 
 	//release lock
-	mutex_unlock(&uiodev->mtx);
+	mutex_unlock(&pUioDev->mtx);
 }
 
-static void clr_int(struct uio48_dev *uiodev, int bit_number)
+//***********************************************************************
+
+static void clr_int( p_uio48_dev pUioDev, int bit_number)
 {
 	unsigned port;
 	unsigned temp;
 	unsigned mask;
-	unsigned base_port = uiodev->base_port;
+	unsigned base_port = pUioDev->base_port;
 
 	// Adjust bit number
 	--bit_number;
 
 	// obtain lock
-	spin_lock(&uiodev->spnlck);
+	spin_lock(&pUioDev->spnlck);
 
 	// Calculate the I/O address based upon bit number
 	port = (bit_number / 8) + base_port + 8;
@@ -425,7 +437,7 @@ static void clr_int(struct uio48_dev *uiodev, int bit_number)
 	mask = (1 << (bit_number % 8));
 
 	// Turn on page 2 access
-	outb(PAGE2 | uiodev->lock_image, base_port + 7);
+	outb(PAGE2 | pUioDev->lock_image, base_port + 7);
 
 	// Get the current state of the interrupt enable register
 	temp = inb(port);
@@ -442,18 +454,20 @@ static void clr_int(struct uio48_dev *uiodev, int bit_number)
 	outb(temp, port);
 
 	// Set access back to page 3
-	outb(PAGE3 | uiodev->lock_image, base_port + 7);
+	outb(PAGE3 | pUioDev->lock_image, base_port + 7);
 
 	//release lock
-	spin_unlock(&uiodev->spnlck);
+	spin_unlock(&pUioDev->spnlck);
 }
 
-static int get_int(struct uio48_dev *uiodev)
+//***********************************************************************
+
+static int get_int( p_uio48_dev pUioDev)
 {
-	unsigned base_port = uiodev->base_port;
+	unsigned base_port = pUioDev->base_port;
 	int i, t;//, ret = 0;
 
-	spin_lock(&uiodev->spnlck);
+	spin_lock(&pUioDev->spnlck);
 
 	/* Read the master interrupt pending register, mask off undefined
 	 * bits. */
@@ -461,7 +475,7 @@ static int get_int(struct uio48_dev *uiodev)
 
 	/* If there are no pending interrupts, return 0. */
 	if (t == 0) {
-		spin_unlock(&uiodev->spnlck);
+		spin_unlock(&pUioDev->spnlck);
 		return 0;
 	}
 
@@ -469,37 +483,39 @@ static int get_int(struct uio48_dev *uiodev)
 	for (i = 0; i < 3; i++) {
 		/* Read the interrupt ID register if necessary */
 		if ((t >> i) & 1) {
-   			uiodev->irq_image[i] = inb(base_port + 8 + i);
+   			pUioDev->irq_image[i] = inb(base_port + 8 + i);
 
 			// clear irq
    			outb(0, base_port + 8 + i);
 		}
 		else
-			uiodev->irq_image[i] = 0;
+			pUioDev->irq_image[i] = 0;
 
 	}
 
-	spin_unlock(&uiodev->spnlck);
+	spin_unlock(&pUioDev->spnlck);
 
 	return 1;
 }
 
-static int get_buffered_int(struct uio48_dev *uiodev)
+//***********************************************************************
+
+static int get_buffered_int( p_uio48_dev pUioDev)
 {
 	int temp;
 
 	// for polled option, no irq selected
-	if (uiodev->irq == 0) {
-		temp = get_int(uiodev);
+	if (pUioDev->irq == 0) {
+		temp = get_int(pUioDev);
 
 		return temp;
 	}
 
-	if (uiodev->outptr != uiodev->inptr) {
-		temp = uiodev->int_buffer[uiodev->outptr++];
+	if (pUioDev->outptr != pUioDev->inptr) {
+		temp = pUioDev->int_buffer[pUioDev->outptr++];
 
-		if (uiodev->outptr == MAX_INTS)
-			uiodev->outptr = 0;
+		if (pUioDev->outptr == MAX_INTS)
+			pUioDev->outptr = 0;
 
 		return temp;
 	}
@@ -507,46 +523,472 @@ static int get_buffered_int(struct uio48_dev *uiodev)
 	return 0;
 }
 
-static void clr_int_id(struct uio48_dev *uiodev, int port_number)
+//***********************************************************************
+
+static void clr_int_id( p_uio48_dev pUioDev, int port_number)
 {
-	unsigned base_port = uiodev->base_port;
+	unsigned base_port = pUioDev->base_port;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&uiodev->mtx);
+	mutex_lock_interruptible(&pUioDev->mtx);
 
 	// write to specified int_id register
 	outb(0, base_port + 8 + port_number);
 
 	//release lock
-	mutex_unlock(&uiodev->mtx);
+	mutex_unlock(&pUioDev->mtx);
 }
 
-static void lock_port(struct uio48_dev *uiodev, int port_number)
+//***********************************************************************
+
+static void lock_port( p_uio48_dev pUioDev, int port_number)
 {
-	unsigned base_port = uiodev->base_port;
+	unsigned base_port = pUioDev->base_port;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&uiodev->mtx);
+	mutex_lock_interruptible(&pUioDev->mtx);
 
 	// write to specified int_id register
-	uiodev->lock_image |= 1 << port_number;
-	outb(PAGE3 | uiodev->lock_image, base_port + 7);
+	pUioDev->lock_image |= 1 << port_number;
+	outb(PAGE3 | pUioDev->lock_image, base_port + 7);
 
 	//release lock
-	mutex_unlock(&uiodev->mtx);
+	mutex_unlock(&pUioDev->mtx);
 }
 
-static void unlock_port(struct uio48_dev *uiodev, int port_number)
+//***********************************************************************
+
+static void unlock_port( p_uio48_dev pUioDev, int port_number)
 {
-	unsigned base_port = uiodev->base_port;
+	unsigned base_port = pUioDev->base_port;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&uiodev->mtx);
+	mutex_lock_interruptible(&pUioDev->mtx);
 
 	// write to specified int_id register
-	uiodev->lock_image &= ~(1 << port_number);
-	outb((PAGE3 | uiodev->lock_image), base_port + 7);
+	pUioDev->lock_image &= ~(1 << port_number);
+	outb((PAGE3 | pUioDev->lock_image), base_port + 7);
 
 	//release lock
-	mutex_unlock(&uiodev->mtx);
+	mutex_unlock(&pUioDev->mtx);
 }
+
+///**********************************************************************
+//			DEVICE OPEN
+///**********************************************************************
+static int device_open(struct inode *inode, struct file *file)
+{
+	struct uio48_dev *uiodev;
+
+	uiodev = container_of(inode->i_cdev, struct uio48_dev, cdev);
+
+	file->private_data = uiodev;
+
+	pr_devel("[%s] device_open\n", uiodev->name);
+
+	return 0;
+}
+
+///**********************************************************************
+//			DEVICE CLOSE
+///**********************************************************************
+static int device_release(struct inode *inode, struct file *file)
+{
+	struct uio48_dev *uiodev;
+
+	uiodev = container_of(inode->i_cdev, struct uio48_dev, cdev);
+
+	pr_devel("[%s] device_release\n", uiodev->name);
+
+	return 0;
+}
+
+///**********************************************************************
+//			DEVICE IOCTL
+///**********************************************************************
+static long device_ioctl(struct file *file, unsigned int ioctl_num,
+			 unsigned long ioctl_param)
+{
+	struct uio48_dev *uiodev = file->private_data;
+	int i, port, ret_val;
+
+	pr_devel("[%s] IOCTL CODE %04X\n", uiodev->name, ioctl_num);
+
+	switch (ioctl_num) {
+	case IOCTL_READ_PORT:
+		port = (ioctl_param & 0xff);
+		ret_val = inb(uiodev->base_port + port);
+		return ret_val;
+
+	case IOCTL_WRITE_PORT:
+		mutex_lock_interruptible(&uiodev->mtx);
+
+		port = (ioctl_param >> 8) & 0xff;
+		ret_val = ioctl_param & 0xff;
+
+		outb(ret_val, uiodev->base_port + port);
+
+		mutex_unlock(&uiodev->mtx);
+
+		return SUCCESS;
+
+	case IOCTL_READ_BIT:
+		ret_val = read_bit(uiodev, ioctl_param & 0xff);
+		return ret_val;
+
+	case IOCTL_WRITE_BIT:
+		write_bit(uiodev, (ioctl_param >> 8) & 0xff, ioctl_param & 0xff);
+		return SUCCESS;
+
+	case IOCTL_SET_BIT:
+		UIO48_set_bit(uiodev, ioctl_param & 0xff);
+		return SUCCESS;
+
+	case IOCTL_CLR_BIT:
+		clr_bit(uiodev, ioctl_param & 0xff);
+		return SUCCESS;
+
+	case IOCTL_ENAB_INT:
+		enab_int(uiodev, (int)(ioctl_param >> 8), (int)(ioctl_param & 0xff));
+		return SUCCESS;
+
+	case IOCTL_DISAB_INT:
+		disab_int(uiodev, ioctl_param & 0xff);
+		return SUCCESS;
+
+	case IOCTL_CLR_INT:
+		clr_int(uiodev, ioctl_param & 0xff);
+		return SUCCESS;
+
+	case IOCTL_GET_INT:
+		i = get_buffered_int(uiodev);
+		return i;
+
+	case IOCTL_WAIT_INT:
+		if ((i = get_buffered_int(uiodev)))
+            return i;
+
+		uiodev->ready = 0;
+		wait_event(uiodev->wq, uiodev->ready);
+
+		/* Getting here does not guarantee that there's an interrupt
+		 * available we may have been awakened by some other signal.
+		 * In any case We'll return whatever's available in the
+		 * interrupt queue even if it's empty. */
+		i = get_buffered_int(uiodev);
+
+		return i;
+
+	case IOCTL_CLR_INT_ID:
+		clr_int_id(uiodev, (int)(ioctl_param & 0xff));
+		return SUCCESS;
+
+	case IOCTL_LOCK_PORT:
+		lock_port(uiodev, (int)(ioctl_param & 0xff));
+		return SUCCESS;
+
+	case IOCTL_UNLOCK_PORT:
+		unlock_port(uiodev, (int)(ioctl_param & 0xff));
+		return SUCCESS;
+
+	default:
+		return -EINVAL;
+	}
+
+	return SUCCESS;
+}
+
+
+//////////////////////////////////////////////////////////////////////////////
+
+//****************************************************************************
+//
+//! \fucntion  static InitializeIntRegs( p_uio48_dev pDev )
+//
+//! \brief  Initializes the HW's interrupt related registers to their runtime
+//!         values. Called by the device's initialization code and by their
+//!         power management "resume" routine when the system is coming out
+//!         of suspend or hibernate
+//
+//! @param[in]      pDev        Pointer to struct pcmmio_device
+//
+//! \return     void
+//
+//****************************************************************************
+static void InitializeIntRegs( p_uio48_dev pDev )
+{
+    
+}
+
+//////////////////////////////////////////////////////////////////////////////
+//
+// power management device operations & structure
+//
+//****************************************************************************
+//
+//! \fucntion   static int uio_suspend( struct device *pDev )
+//
+//! \brief  Called by the power management framework when the system is entering
+//!         a "suspend" state.
+//
+//! @param[in]  pDev    Pointer to "parent" device for this pcmmio_device
+//
+//! \return     Always returns 0
+//
+//! \note       This call is from the power management capability of this
+//!             device's class
+//
+//****************************************************************************
+static int uio_suspend( struct device *pDev )
+{
+   p_uio48_dev pUioDev = ( p_uio48_dev ) to_uio48_dev( pDev );    // pointer to the uio device
+                                                                     
+   mutex_lock( &pUioDev->mtx );
+
+   pr_info( "%s - /dev/%s\n", __func__, pUioDev->name );
+
+   mutex_unlock( &pUioDev->mtx );
+
+   return 0;
+}
+
+//****************************************************************************
+//
+//! \fucntion   static int uio_resume( struct device *pDev )
+//
+//! \brief  Called by the power management framework when the system is entering
+//!         a "suspend" state.
+//
+//! @param[in]  pDev    Pointer to "parent" device for this pcmmio_device
+//
+//! \return     Always returns 0
+//
+//! \note       This call is from the power management capability of this
+//!             device's class
+//
+//****************************************************************************
+static int uio_resume( struct device *pDev )
+{
+   p_uio48_dev pUioDev = ( p_uio48_dev ) to_uio48_dev( pDev );    // pointer to the uio device
+                                                                         
+   mutex_lock( &pUioDev->mtx );
+   
+   pr_info( "%s - /dev/%s\n", __func__, pUioDev->name );
+   
+   InitializeIntRegs( pUioDev );
+
+   mutex_unlock( &pUioDev->mtx );
+
+   return 0;
+}
+
+//****************************************************************************
+//
+//! \fucntion   static int uio_idle( struct device *pDev )
+//
+//! \brief  Called by the power management framework when the system is entering
+//!         a "suspend" state.
+//
+//! @param[in]  pDev    Pointer to "parent" device for this pcmmio_device
+//
+//! \return     Always returns 0
+//
+//! \note       This call is from the power management capability of this
+//!             device's class
+//
+//****************************************************************************
+static int uio_idle( struct device *pDev )
+{
+   p_uio48_dev pUioDev = ( p_uio48_dev ) to_uio48_dev( pDev );    // pointer to the uio device
+                                                                          
+   mutex_lock( &pUioDev->mtx );
+   
+   pr_info( "%s - /dev/%s\n", __func__, pUioDev->name );
+                                                                  
+   mutex_unlock( &pUioDev->mtx );
+
+   return 0;
+}
+
+static UNIVERSAL_DEV_PM_OPS( uio_class_dev_pm_ops, uio_suspend, uio_resume, uio_idle );
+
+////////////////////////////////////////////////////////////////////////////
+
+
+
+
+///**********************************************************************
+//			Module Declarations
+// This structure will hold the functions to be called
+// when a process does something to the device
+///**********************************************************************
+static struct file_operations uio48_fops = {
+	owner:			THIS_MODULE,
+	unlocked_ioctl:		device_ioctl,
+	open:			device_open,
+	release:		device_release,
+};
+
+///**********************************************************************
+//			INIT MODULE
+///**********************************************************************
+// register the character device
+int init_module()
+{
+	int ret_val, io_num;
+	dev_t dev;
+	int x;
+
+	pr_info(MOD_DESC " loading\n");
+
+	p_uio48_class = class_create(THIS_MODULE, KBUILD_MODNAME);
+	if (IS_ERR(p_uio48_class)) {
+		pr_err("Could not create module class\n");
+		return PTR_ERR(p_uio48_class);
+	}
+	
+	p_uio48_class->pm = &uio_class_dev_pm_ops;
+
+	/* Register the character device. */
+	if (uio48_init_major) {
+		uio48_devno = MKDEV(uio48_init_major, 0);
+		ret_val = register_chrdev_region(uio48_devno, MAX_CHIPS, KBUILD_MODNAME);
+	} else {
+		ret_val = alloc_chrdev_region(&uio48_devno, 0, MAX_CHIPS, KBUILD_MODNAME);
+		uio48_init_major = MAJOR(uio48_devno);
+	}
+
+	if (ret_val < 0) {
+		pr_err("Cannot obtain major number (%d)\n", uio48_init_major);
+		return ret_val;
+	}
+
+	pr_info("Major number %d assigned\n", uio48_init_major);
+
+        for ( x = io_num = 0; x < MAX_CHIPS; x++ ) 
+        {
+           p_uio48_dev pUioDev = &uiodevs[ x ];
+
+           // 
+           // If no IO port, skip this idx
+           //
+           
+           if ( io_port[ x ] == 0 )
+           {
+              continue;
+           }
+
+           mutex_init( &pUioDev->mtx );
+           spin_lock_init( &pUioDev->spnlck );
+           init_waitqueue_head( &pUioDev->wq );
+
+           dev = uio48_devno + x;
+
+           /* Initialize char device. */
+           cdev_init( &pUioDev->cdev, &uio48_fops );
+           ret_val = cdev_add( &pUioDev->cdev, dev, 1 );
+
+           if ( ret_val ) 
+           {
+              pr_err("Error adding character device for node %d\n", x);
+              return ret_val;
+           }
+
+           /* Check and map our I/O region requests. */
+           if ( request_region( io_port[ x ], 0x10, KBUILD_MODNAME ) == NULL) 
+           {
+              pr_err("Unable to use I/O Address %04X\n", io_port[ x ] );
+              cdev_del( &pUioDev->cdev );
+              continue;
+           }
+
+           init_io( pUioDev, io_port[ x ] );
+
+           
+           if ( irq[ x ] )      // use an interrupt?
+           {
+              //
+              // map interrupt
+              //
+               
+              if ( request_irq( irq[ x ], irq_handler, IRQF_SHARED, KBUILD_MODNAME, pUioDev ) ) 
+              {
+                 pr_err("Unable to register IRQ %d\n", irq[x]);
+                 release_region( io_port[ x ], 0x10 );
+                 cdev_del( &pUioDev->cdev );
+                 continue;
+              }
+
+              pUioDev->irq = irq[ x ];
+           }
+
+           io_num++;
+           BoardCount++;
+
+           sprintf(pUioDev->name, KBUILD_MODNAME "%c", 'a' + x);
+
+           pr_info("[%s] Added new device\n", pUioDev->name);
+
+           pUioDev->pDev = device_create(p_uio48_class, NULL, dev, NULL, "%s", pUioDev->name);
+                
+           pUioDev->pDev->driver_data = ( void *)( pUioDev );    // pUioDev->pDev is a pointer to the system device
+                                                                 // returned by device_create. We're setting that
+                                                                 // device's driver_data to be a pointer to the
+                                                                 // current pcmmio_device
+        }
+
+        if ( io_num )
+        {
+           return 0;
+        }
+
+        pr_warning( "No resources available, driver terminating\n" );
+
+        class_destroy( p_uio48_class );
+        unregister_chrdev_region( uio48_devno, MAX_CHIPS );
+
+        return -ENODEV;
+}
+
+///**********************************************************************
+//			CLEANUP MODULE
+///**********************************************************************
+// unregister the appropriate file from /proc
+void cleanup_module()
+{
+   int x;
+
+   //
+   // Unregister I/O port usage and IRQ
+   //
+   
+   for (x = 0; x < MAX_CHIPS; x++) 
+   {
+      p_uio48_dev pUioDev = &uiodevs[ x ];
+      
+      if ( io_port[ x ] == 0 )
+      {
+         continue;
+      }
+        
+      if ( pUioDev->base_port )
+      {
+         release_region( pUioDev->base_port, 0x10 );
+      }
+
+      if ( pUioDev->irq )
+      {
+         free_irq( pUioDev->irq, pUioDev );
+      }
+
+      cdev_del( &pUioDev->cdev );
+      device_destroy( p_uio48_class, ( uio48_devno + x ) );
+      
+      pr_info( "[%s] Removed existing device\n", pUioDev->name );
+
+   }
+
+   class_destroy( p_uio48_class );
+   unregister_chrdev_region( uio48_devno, MAX_CHIPS );
+}
+
