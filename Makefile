@@ -16,7 +16,7 @@ uio48io.o: uio48io.c uio48.h Makefile
 
 all:    default install poll flash
 
-install:
+install:	default
 	mkdir -p $(MODULE_INSTALLDIR)
 	rm -f $(MODULE_INSTALLDIR)uio48.ko
 	install -c -m 0644 uio48.ko $(MODULE_INSTALLDIR)
