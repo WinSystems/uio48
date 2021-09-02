@@ -119,13 +119,15 @@ int main(int argc, char *argv[])
 		// The foreground will now wait for an input from the console
 		// We could actually go on and do anything we wanted to at this 
 		// point.
+		printf("Press \'q' or \'Q' followed by the \'ENTER' key to exit polling loop\n");
 		fgets(line,75,stdin);
 
 		//sleep(2);
 
-		if(line[0] == 'q' || line[0] == 'Q')
+		if(line[0] == 'q' || line[0] == 'Q'){
+		    printf("Exiting Loop\n");
 		    break;
-
+		}
 		// Here's the actual exit. If we hit 'Q' and Enter. The program
 		// terminates.
     }
@@ -144,9 +146,12 @@ int main(int argc, char *argv[])
     // us. If we leave them hanging and we try to re-run the program or
     // if another program wants to talk to the device they may be locked
     // out. This way everything cleans up much nicer.
-    pthread_cancel(a_thread);
+    if(pthread_cancel(a_thread) != 0){
+	printf("Could not cancel thread\n");
+    }
 
     printf("\nExiting Now\n");
+    printf("Generate another event to exit\n");
 
     fflush(NULL);
 }

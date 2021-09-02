@@ -356,7 +356,7 @@ int init_module()
 	if (io_num)
 		return 0;
 
-	pr_warning("No resources available, driver terminating\n");
+	pr_warn("No resources available, driver terminating\n");
 
 	class_destroy(uio48_class);
 	unregister_chrdev_region(uio48_devno, MAX_CHIPS);
