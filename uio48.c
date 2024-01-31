@@ -1,7 +1,7 @@
 /*
  * uio48.c: UIO48 Digital I/O Driver
  *
- * (C) Copyright 2011, 2016 by WinSystems, Inc.
+ * (C) Copyright 2011, 2016, 2024 by WinSystems, Inc.
  * Author: Paul DeMetrotion <pdemetrotion@winsystems.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -178,7 +178,7 @@ static long device_ioctl(struct file *file, unsigned int ioctl_num,
 		return ret_val;
 
 	case IOCTL_WRITE_PORT:
-		mutex_lock_interruptible(&uiodev->mtx);
+		ret_val = mutex_lock_interruptible(&uiodev->mtx);
 
 		port = (ioctl_param >> 8) & 0xff;
 		ret_val = ioctl_param & 0xff;
@@ -279,7 +279,7 @@ int init_module()
 
 	pr_info(MOD_DESC " loading\n");
 
-	uio48_class = class_create(THIS_MODULE, KBUILD_MODNAME);
+	uio48_class = class_create(KBUILD_MODNAME);
 	if (IS_ERR(uio48_class)) {
 		pr_err("Could not create module class\n");
 		return PTR_ERR(uio48_class);
@@ -356,7 +356,7 @@ int init_module()
 	if (io_num)
 		return 0;
 
-	pr_warning("No resources available, driver terminating\n");
+	pr_warn("No resources available, driver terminating\n");
 
 	class_destroy(uio48_class);
 	unregister_chrdev_region(uio48_devno, MAX_CHIPS);
@@ -398,10 +398,10 @@ void cleanup_module()
 
 static void init_io(struct uio48_dev *uiodev, unsigned base_port)
 {
-	int x;
+	int x, ret_val;
 
 	// obtain lock
-	mutex_lock_interruptible(&uiodev->mtx);
+	ret_val = mutex_lock_interruptible(&uiodev->mtx);
 
 	// save the address for later use
 	uiodev->base_port = base_port;
@@ -460,12 +460,13 @@ static void write_bit(struct uio48_dev *uiodev, int bit_number, int val)
 	unsigned port;
 	unsigned temp;
 	unsigned mask;
+    int ret_val;
 
 	// Adjust bit number for 0 based numbering
 	--bit_number;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&uiodev->mtx);
+	ret_val = mutex_lock_interruptible(&uiodev->mtx);
 
 	// Calculate the I/O address of the port based on the bit number
 	port = (bit_number / 8) + uiodev->base_port;
@@ -508,12 +509,13 @@ static void enab_int(struct uio48_dev *uiodev, int bit_number, int polarity)
 	unsigned temp;
 	unsigned mask;
 	unsigned base_port = uiodev->base_port;
+    int ret_val;
 
 	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
-	mutex_lock_interruptible(&uiodev->mtx);
+	ret_val = mutex_lock_interruptible(&uiodev->mtx);
 
 	// Calculate the I/O address based upon bit number
 	port = (bit_number / 8) + base_port + 8;
@@ -561,12 +563,13 @@ static void disab_int(struct uio48_dev *uiodev, int bit_number)
 	unsigned temp;
 	unsigned mask;
 	unsigned base_port = uiodev->base_port;
+    int ret_val;
 
 	// Also adjust bit number
 	--bit_number;
 
 	// obtain lock
-	mutex_lock_interruptible(&uiodev->mtx);
+	ret_val = mutex_lock_interruptible(&uiodev->mtx);
 
 	// Calculate the I/O address based upon bit number
 	port = (bit_number / 8) + base_port + 8;
@@ -698,9 +701,10 @@ static int get_buffered_int(struct uio48_dev *uiodev)
 static void clr_int_id(struct uio48_dev *uiodev, int port_number)
 {
 	unsigned base_port = uiodev->base_port;
+    int ret_val;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&uiodev->mtx);
+	ret_val = mutex_lock_interruptible(&uiodev->mtx);
 
 	// write to specified int_id register
 	outb(0, base_port + 8 + port_number);
@@ -712,9 +716,10 @@ static void clr_int_id(struct uio48_dev *uiodev, int port_number)
 static void lock_port(struct uio48_dev *uiodev, int port_number)
 {
 	unsigned base_port = uiodev->base_port;
+    int ret_val;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&uiodev->mtx);
+	ret_val = mutex_lock_interruptible(&uiodev->mtx);
 
 	// write to specified int_id register
 	uiodev->lock_image |= 1 << port_number;
@@ -727,9 +732,10 @@ static void lock_port(struct uio48_dev *uiodev, int port_number)
 static void unlock_port(struct uio48_dev *uiodev, int port_number)
 {
 	unsigned base_port = uiodev->base_port;
+    int ret_val;
 
 	// obtain lock before writing
-	mutex_lock_interruptible(&uiodev->mtx);
+	ret_val = mutex_lock_interruptible(&uiodev->mtx);
 
 	// write to specified int_id register
 	uiodev->lock_image &= ~(1 << port_number);
